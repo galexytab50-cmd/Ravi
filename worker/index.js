@@ -8,6 +8,30 @@
 const KV_KEY = 'posts';
 const MAX_STORED_POSTS = 5000; // سقف فنی برای جلوگیری از رشد بی‌رویه‌ی KV؛ عملاً نامحدود
 
+// چهار منطقه: عراق از قبل کلیدهای خودش رو داره (بدون تغییر، برای سازگاری با داده‌ی قدیمی)،
+// بقیه‌ی مناطق کلید جدا با پیشوند منطقه می‌گیرن — تا وقتی کانالی وصل نشده، همیشه خالی برمی‌گردن.
+const VALID_REGIONS = ['iraq', 'usa', 'europe', 'latam'];
+
+function normalizeRegion(region) {
+  return VALID_REGIONS.includes(region) ? region : 'iraq';
+}
+
+function postsKey(region) {
+  return region === 'iraq' ? KV_KEY : `posts:${region}`;
+}
+
+function psyopLatestKey(region) {
+  return region === 'iraq' ? 'psyop_report_latest' : `psyop_report_latest:${region}`;
+}
+
+function psyopHistoryKey(region) {
+  return region === 'iraq' ? 'psyop_report_history' : `psyop_report_history:${region}`;
+}
+
+function psyopLastGenKey(region) {
+  return region === 'iraq' ? 'psyop_report_last_generated_at' : `psyop_report_last_generated_at:${region}`;
+}
+
 // «خبر فوری الجزیره» یه کانال عمومیه که ما ادمینش نیستیم، پس به‌جای وبهوک،
 // از صفحه‌ی پیش‌نمایش عمومی تلگرام (t.me/s/...) می‌خونیمش — این صفحه برای هر
 // کانال عمومی بدون نیاز به هیچ دسترسی خاصی در دسترسه.
@@ -28,6 +52,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const region = normalizeRegion(url.searchParams.get('region'));
 
     if (path === '/api/telegram-webhook') {
       if (request.method === 'POST') return handleWebhook(request, env);
@@ -35,7 +60,7 @@ export default {
     }
 
     if (path === '/api/telegram-posts' && request.method === 'GET') {
-      return handlePosts(env);
+      return handlePosts(env, region);
     }
 
     if (path === '/api/telegram-media' && request.method === 'GET') {
@@ -43,15 +68,15 @@ export default {
     }
 
     if (path === '/api/archive' && request.method === 'GET') {
-      return handleArchive(request, env);
+      return handleArchive(request, env, region);
     }
 
     if (path === '/api/psyop-report' && request.method === 'GET') {
-      return handlePsyopReportGet(env);
+      return handlePsyopReportGet(env, region);
     }
 
     if (path === '/api/psyop-report/generate' && request.method === 'POST') {
-      return handlePsyopReportGenerate(request, env);
+      return handlePsyopReportGenerate(request, env, region);
     }
 
     if (path === '/api/breaking-news' && request.method === 'GET') {
@@ -59,7 +84,7 @@ export default {
     }
 
     if (path === '/api/admin/clear-posts' && request.method === 'POST') {
-      return handleClearPosts(request, env);
+      return handleClearPosts(request, env, region);
     }
 
     // هر درخواست دیگه‌ای -> فایل‌های استاتیک ساخته‌شده توسط Vite (پوشه‌ی dist)
@@ -289,7 +314,7 @@ ${numbered}`;
 // پاک‌کردن کامل اخبار ذخیره‌شده (پوشش زنده + آرشیو، چون هر دو از همین کلید می‌خونن).
 // عملی غیرقابل‌بازگشته، برای همین با همون WEBHOOK_SECRET محافظت می‌شه
 // و کلید رو تو خودِ مرورگر ذخیره نمی‌کنیم — هر بار باید واردش کنی.
-async function handleClearPosts(request, env) {
+async function handleClearPosts(request, env, region) {
   const secretHeader = request.headers.get('X-Admin-Secret');
   if (!env.WEBHOOK_SECRET || secretHeader !== env.WEBHOOK_SECRET) {
     return new Response(JSON.stringify({ ok: false, error: 'رمز نادرست است.' }), {
@@ -298,7 +323,7 @@ async function handleClearPosts(request, env) {
     });
   }
 
-  await env.POSTS.delete(KV_KEY);
+  await env.POSTS.delete(postsKey(region));
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
@@ -309,8 +334,8 @@ async function handleClearPosts(request, env) {
 /* -------------------------------------------------------------------
    تب «پوشش زنده اخبار» - همه‌ی پست‌ها، بدون محدودیت نمایشی
 ------------------------------------------------------------------- */
-async function handlePosts(env) {
-  const raw = await env.POSTS.get(KV_KEY);
+async function handlePosts(env, region) {
+  const raw = await env.POSTS.get(postsKey(region));
   let posts = [];
   if (raw) {
     try { posts = JSON.parse(raw); } catch { posts = []; }
@@ -347,7 +372,7 @@ function getIraqDayStartMs(nowMs) {
   return Date.UTC(y, m, day, 0, 0, 0) - 3 * 60 * 60 * 1000;
 }
 
-async function handleArchive(request, env) {
+async function handleArchive(request, env, region) {
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date'); // فرمت مورد انتظار: YYYY-MM-DD
 
@@ -358,7 +383,7 @@ async function handleArchive(request, env) {
     });
   }
 
-  const raw = await env.POSTS.get(KV_KEY);
+  const raw = await env.POSTS.get(postsKey(region));
   const allPosts = raw ? JSON.parse(raw) : [];
   const matched = allPosts.filter((p) => toIraqDateString(p.date) === dateParam);
 
@@ -374,8 +399,8 @@ async function handleArchive(request, env) {
 /* -------------------------------------------------------------------
    تب «عملیات روانی» - گزارش با کلیک دکمه (بدون خودکارسازی)
 ------------------------------------------------------------------- */
-async function handlePsyopReportGet(env) {
-  const raw = await env.POSTS.get('psyop_report_latest');
+async function handlePsyopReportGet(env, region) {
+  const raw = await env.POSTS.get(psyopLatestKey(region));
   const report = raw ? JSON.parse(raw) : null;
 
   return new Response(JSON.stringify({ report }), {
@@ -392,9 +417,9 @@ async function handlePsyopReportGet(env) {
 // (مثلاً کلیک پشت‌سرهم که هزینه‌ی API دیپ‌سیک رو بالا ببره)، یه فاصله‌ی زمانی حداقلی می‌ذاریم.
 const GENERATE_COOLDOWN_MS = 60 * 1000; // یک دقیقه
 
-async function handlePsyopReportGenerate(request, env) {
+async function handlePsyopReportGenerate(request, env, region) {
   const now = Date.now();
-  const lastRaw = await env.POSTS.get('psyop_report_last_generated_at');
+  const lastRaw = await env.POSTS.get(psyopLastGenKey(region));
   const last = lastRaw ? parseInt(lastRaw, 10) : 0;
 
   if (now - last < GENERATE_COOLDOWN_MS) {
@@ -405,17 +430,17 @@ async function handlePsyopReportGenerate(request, env) {
     });
   }
 
-  await env.POSTS.put('psyop_report_last_generated_at', String(now));
+  await env.POSTS.put(psyopLastGenKey(region), String(now));
 
-  const report = await generatePsyopReport(env);
+  const report = await generatePsyopReport(env, region);
   return new Response(JSON.stringify({ ok: true, report }), {
     status: 200,
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
 }
 
-async function generatePsyopReport(env) {
-  const raw = await env.POSTS.get(KV_KEY);
+async function generatePsyopReport(env, region) {
+  const raw = await env.POSTS.get(postsKey(region));
   const allPosts = raw ? JSON.parse(raw) : [];
 
   const now = Date.now();
@@ -437,17 +462,17 @@ async function generatePsyopReport(env) {
     top5News: ai.top5News,
   };
 
-  await env.POSTS.put('psyop_report_latest', JSON.stringify(report));
+  await env.POSTS.put(psyopLatestKey(region), JSON.stringify(report));
 
   // یه تاریخچه‌ی کوتاه هم نگه می‌داریم (برای توسعه‌های بعدی)
-  const historyRaw = await env.POSTS.get('psyop_report_history');
+  const historyRaw = await env.POSTS.get(psyopHistoryKey(region));
   let history = [];
   if (historyRaw) {
     try { history = JSON.parse(historyRaw); } catch { history = []; }
   }
   history.unshift({ generatedAt: now, newsCount: report.newsCount, summary: report.summary });
   history = history.slice(0, 30);
-  await env.POSTS.put('psyop_report_history', JSON.stringify(history));
+  await env.POSTS.put(psyopHistoryKey(region), JSON.stringify(history));
 
   return report;
 }
