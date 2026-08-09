@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import {
   Newspaper, RefreshCw, ExternalLink, ImageOff, WifiOff, Loader2,
@@ -61,6 +62,7 @@ input { font-family: inherit; }
   display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 9px;
   font-size: 13px; font-weight: 700; cursor: pointer; border: 1px solid transparent;
   background: transparent; color: ${C.textFaint}; text-align: right; width: 100%; transition: all 0.15s ease;
+  text-decoration: none; box-sizing: border-box;
 }
 .iraf-side-btn:hover { background: ${C.goldSoft}; color: ${C.gold}; }
 .iraf-side-btn.active { background: ${C.gold}; color: #FFFFFF; box-shadow: 0 2px 6px rgba(21,21,156,0.30); }
@@ -270,7 +272,7 @@ function StateBlock({ icon, text, color }) {
 /* ---------------------------------------------------------------------
    تب ۱ — پوشش زنده اخبار
 --------------------------------------------------------------------- */
-function LiveTab() {
+function LiveTab({ region }) {
   const [posts, setPosts] = useState([]);
   const [status, setStatus] = useState('loading');
   const [refreshing, setRefreshing] = useState(false);
@@ -281,7 +283,7 @@ function LiveTab() {
   const load = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const res = await fetch('/api/telegram-posts');
+      const res = await fetch(`/api/telegram-posts?region=${region}`);
       const data = await res.json();
       if (cancelledRef.current) return;
       if (data.posts && data.posts.length > 0) {
@@ -301,10 +303,11 @@ function LiveTab() {
 
   useEffect(() => {
     cancelledRef.current = false;
+    setStatus('loading');
     load();
     const interval = setInterval(load, POLL_INTERVAL_MS);
     return () => { cancelledRef.current = true; clearInterval(interval); };
-  }, []);
+  }, [region]);
 
   const handleClearAll = async () => {
     const confirmed = window.confirm('همه‌ی اخبار ذخیره‌شده (پوشش زنده و آرشیو) برای همیشه پاک می‌شود. مطمئنی؟');
@@ -315,7 +318,7 @@ function LiveTab() {
 
     setClearing(true);
     try {
-      const res = await fetch('/api/admin/clear-posts', {
+      const res = await fetch(`/api/admin/clear-posts?region=${region}`, {
         method: 'POST',
         headers: { 'X-Admin-Secret': secret },
       });
@@ -364,7 +367,7 @@ function LiveTab() {
 /* ---------------------------------------------------------------------
    تب ۲ — آرشیو مطالب (با تقویم قابل کلیک)
 --------------------------------------------------------------------- */
-function ArchiveTab() {
+function ArchiveTab({ region }) {
   const [date, setDate] = useState(todayIsoDate());
   const [posts, setPosts] = useState([]);
   const [status, setStatus] = useState('loading');
@@ -372,7 +375,7 @@ function ArchiveTab() {
   const loadDate = async (d) => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/archive?date=${encodeURIComponent(d)}`);
+      const res = await fetch(`/api/archive?region=${region}&date=${encodeURIComponent(d)}`);
       const data = await res.json();
       if (data.posts && data.posts.length > 0) {
         setPosts(data.posts);
@@ -386,7 +389,7 @@ function ArchiveTab() {
     }
   };
 
-  useEffect(() => { loadDate(date); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadDate(date); }, [region]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDateChange = (e) => {
     const d = e.target.value;
@@ -432,7 +435,7 @@ function ReportSection({ title, children }) {
   );
 }
 
-function PsyopTab() {
+function PsyopTab({ region }) {
   const [report, setReport] = useState(null);
   const [status, setStatus] = useState('loading');
   const [generating, setGenerating] = useState(false);
@@ -441,7 +444,7 @@ function PsyopTab() {
   const load = async () => {
     setStatus('loading');
     try {
-      const res = await fetch('/api/psyop-report');
+      const res = await fetch(`/api/psyop-report?region=${region}`);
       const data = await res.json();
       if (data.report) {
         setReport(data.report);
@@ -454,13 +457,13 @@ function PsyopTab() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [region]);
 
   const handleGenerate = async () => {
     setGenerating(true);
     setGenerateError(null);
     try {
-      const res = await fetch('/api/psyop-report/generate', { method: 'POST' });
+      const res = await fetch(`/api/psyop-report/generate?region=${region}`, { method: 'POST' });
       const data = await res.json();
       if (data.ok && data.report) {
         setReport(data.report);
@@ -590,7 +593,7 @@ function PosterBar({ word, count, max }) {
   );
 }
 
-function InfographicTab() {
+function InfographicTab({ region }) {
   const [report, setReport] = useState(null);
   const [status, setStatus] = useState('loading');
   const [exporting, setExporting] = useState(false);
@@ -600,7 +603,7 @@ function InfographicTab() {
   const load = async () => {
     setStatus('loading');
     try {
-      const res = await fetch('/api/psyop-report');
+      const res = await fetch(`/api/psyop-report?region=${region}`);
       const data = await res.json();
       if (data.report) {
         setReport(data.report);
@@ -613,7 +616,7 @@ function InfographicTab() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [region]);
 
   const handleDownload = async () => {
     if (!posterRef.current || !report) return;
@@ -779,7 +782,7 @@ function InfographicTab() {
 
 
 /* ---------------------------------------------------------------------
-   اپ اصلی — هدر با لوگو، ساعت زنده و ناوبری مناطق
+   اپ اصلی — هدر با لوگو، ساعت زنده، ناوبری مناطق، و مسیریابی واقعی
 --------------------------------------------------------------------- */
 const TABS = [
   { key: 'live', label: 'پوشش زنده اخبار', icon: Newspaper },
@@ -795,19 +798,19 @@ const REGIONS = [
   { key: 'latam', label: 'راوی آمریکای لاتین' },
 ];
 
-function ComingSoonRegion({ label }) {
-  return (
-    <div style={{ textAlign: 'center', padding: '110px 20px', color: C.textFaint }}>
-      <div style={{ fontSize: 19, fontWeight: 800, marginBottom: 10, color: C.text }}>{label}</div>
-      <div style={{ fontSize: 13.5 }}>این بخش به‌زودی راه‌اندازی می‌شود.</div>
-    </div>
-  );
-}
+function RegionPage() {
+  const params = useParams();
+  const navigate = useNavigate();
 
-export default function App() {
-  const [activeRegion, setActiveRegion] = useState('iraq');
-  const [activeTab, setActiveTab] = useState('live');
-  const clockInfo = REGION_CLOCKS[activeRegion] || REGION_CLOCKS.iraq;
+  const validRegion = REGIONS.some((r) => r.key === params.region) ? params.region : 'iraq';
+  const validTab = TABS.some((t) => t.key === params.tab) ? params.tab : 'live';
+  const clockInfo = REGION_CLOCKS[validRegion] || REGION_CLOCKS.iraq;
+
+  useEffect(() => {
+    if (params.region !== validRegion || params.tab !== validTab) {
+      navigate(`/${validRegion}/${validTab}`, { replace: true });
+    }
+  }, [params.region, params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="iraf-root">
@@ -817,7 +820,7 @@ export default function App() {
       <div style={{ background: '#0D0D6E' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {activeRegion === 'iraq' && <BreakingNewsTicker />}
+            {validRegion === 'iraq' && <BreakingNewsTicker />}
           </div>
           <LiveClock timeZone={clockInfo.timeZone} label={clockInfo.label} />
         </div>
@@ -829,62 +832,71 @@ export default function App() {
           className="iraf-header-inner"
           style={{ maxWidth: 1280, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 20px', flexWrap: 'wrap' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Link to="/iraq/live" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}>
             <img src={raviLogo} alt="راوی" style={{ height: 46, width: 'auto', display: 'block' }} />
             <div style={{ borderRight: `1.5px solid ${C.border}`, paddingRight: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <span style={{ fontSize: 13, fontWeight: 800, color: C.gold, lineHeight: 1.5 }}>روایت زنده‌ی رویدادها</span>
               <span style={{ fontSize: 10.5, color: C.textFaint, lineHeight: 1.5 }}>هر خبر، همان لحظه</span>
             </div>
-          </div>
+          </Link>
 
           <nav style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {REGIONS.map((r) => (
-              <button
+              <Link
                 key={r.key}
-                onClick={() => setActiveRegion(r.key)}
+                to={`/${r.key}/live`}
                 style={{
-                  background: activeRegion === r.key ? C.gold : 'transparent',
-                  color: activeRegion === r.key ? '#FFFFFF' : C.gold,
-                  border: `1px solid ${activeRegion === r.key ? C.gold : C.border}`,
+                  background: validRegion === r.key ? C.gold : 'transparent',
+                  color: validRegion === r.key ? '#FFFFFF' : C.gold,
+                  border: `1px solid ${validRegion === r.key ? C.gold : C.border}`,
                   borderRadius: 8, padding: '8px 15px', fontSize: 13, fontWeight: 700,
-                  cursor: 'pointer', transition: 'all 0.15s ease',
+                  textDecoration: 'none', transition: 'all 0.15s ease',
                 }}
               >
                 {r.label}
-              </button>
+              </Link>
             ))}
           </nav>
         </div>
       </div>
 
-      {activeRegion === 'iraq' ? (
-        <div className="iraf-layout iraf-scroll" style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px 60px' }}>
-          <aside className="iraf-sidebar">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.key}
-                  className={`iraf-side-btn ${activeTab === tab.key ? 'active' : ''}`}
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  <Icon size={16} />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </aside>
+      <div className="iraf-layout iraf-scroll" style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px 60px' }}>
+        <aside className="iraf-sidebar">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <Link
+                key={tab.key}
+                to={`/${validRegion}/${tab.key}`}
+                className={`iraf-side-btn ${validTab === tab.key ? 'active' : ''}`}
+              >
+                <Icon size={16} />
+                {tab.label}
+              </Link>
+            );
+          })}
+        </aside>
 
-          <main style={{ flex: 1, minWidth: 0 }}>
-            {activeTab === 'live' && <LiveTab />}
-            {activeTab === 'archive' && <ArchiveTab />}
-            {activeTab === 'psyop' && <PsyopTab />}
-            {activeTab === 'infographic' && <InfographicTab />}
-          </main>
-        </div>
-      ) : (
-        <ComingSoonRegion label={REGIONS.find((r) => r.key === activeRegion).label} />
-      )}
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {validTab === 'live' && <LiveTab region={validRegion} />}
+          {validTab === 'archive' && <ArchiveTab region={validRegion} />}
+          {validTab === 'psyop' && <PsyopTab region={validRegion} />}
+          {validTab === 'infographic' && <InfographicTab region={validRegion} />}
+        </main>
+      </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Navigate to="/iraq/live" replace />} />
+        <Route path="/:region" element={<RegionPage />} />
+        <Route path="/:region/:tab" element={<RegionPage />} />
+        <Route path="*" element={<Navigate to="/iraq/live" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
