@@ -87,6 +87,18 @@ export default {
       return handleClearPosts(request, env, region);
     }
 
+    if (path === '/api/scenario/generate' && request.method === 'POST') {
+      return handleScenarioGenerate(request, env);
+    }
+
+    if (path === '/api/caption/generate' && request.method === 'POST') {
+      return handleCaptionGenerate(request, env);
+    }
+
+    if (path === '/api/wordcloud' && request.method === 'GET') {
+      return handleWordCloud(env, region);
+    }
+
     // هر درخواست دیگه‌ای -> فایل‌های استاتیک ساخته‌شده توسط Vite (پوشه‌ی dist)
     return env.ASSETS.fetch(request);
   },
@@ -606,6 +618,186 @@ ${sample}`;
       top5News: [],
     };
   }
+}
+
+/* -------------------------------------------------------------------
+   «ارسال به سناریو ساز» — از متن یک خبر، سناریوی کوتاه ویدیویی می‌سازه
+------------------------------------------------------------------- */
+const AI_TOOL_COOLDOWN_MS = 15 * 1000; // ۱۵ ثانیه، برای جلوگیری از کلیک پشت‌سرهم
+
+async function checkAiToolCooldown(env, cooldownKvKey) {
+  const now = Date.now();
+  const lastRaw = await env.POSTS.get(cooldownKvKey);
+  const last = lastRaw ? parseInt(lastRaw, 10) : 0;
+  if (now - last < AI_TOOL_COOLDOWN_MS) {
+    const waitSec = Math.ceil((AI_TOOL_COOLDOWN_MS - (now - last)) / 1000);
+    return waitSec;
+  }
+  await env.POSTS.put(cooldownKvKey, String(now));
+  return 0;
+}
+
+async function handleScenarioGenerate(request, env) {
+  const waitSec = await checkAiToolCooldown(env, 'scenario_last_call');
+  if (waitSec > 0) {
+    return new Response(JSON.stringify({ ok: false, error: `لطفاً ${waitSec} ثانیه‌ی دیگر دوباره تلاش کنید.` }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+
+  let body;
+  try { body = await request.json(); } catch { body = {}; }
+  const text = (body.text || '').toString();
+  if (!text.trim()) {
+    return new Response(JSON.stringify({ ok: false, error: 'متن خبر خالی است.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+  if (!env.DEEPSEEK_API_KEY) {
+    return new Response(JSON.stringify({ ok: false, error: 'کلید DEEPSEEK_API_KEY تنظیم نشده است.' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+
+  const prompt = `متن خبر زیر را در نظر بگیر. یک سناریوی کوتاه برای تولید یک ویدیوی خبری (مثل ریلز/شورت، در حدود ۳۰ تا ۶۰ ثانیه) از روی آن بساز.
+خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) با دقیقاً این ساختار بده:
+
+{
+  "title": "یک عنوان کوتاه و جذاب برای ویدیو",
+  "totalDurationSeconds": عدد کل مدت‌زمان تقریبی به ثانیه,
+  "shots": [
+    {
+      "shotNumber": 1,
+      "durationSeconds": عدد مدت این شات به ثانیه,
+      "narration": "متن دقیقی که گوینده باید در این شات بگوید",
+      "visualSuggestion": "پیشنهاد تصویر یا ویدیوی زمینه‌ی مناسب برای این شات"
+    }
+  ]
+}
+
+بین ۳ تا ۶ شات بساز، به‌ترتیب منطقی روایت خبر (مقدمه، بدنه، نتیجه/جمع‌بندی).
+
+متن خبر:
+${safeTruncate(text, 1500)}`;
+
+  try {
+    const result = await callDeepSeekJson(env, prompt, 'تو فقط و فقط خروجی JSON معتبر تولید می‌کنی، بدون هیچ متن اضافه.');
+    return new Response(JSON.stringify({ ok: true, scenario: result }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+}
+
+/* -------------------------------------------------------------------
+   «ارسال به کپشن ساز» — از متن یک خبر، کپشن مخصوص هر شبکه‌ی اجتماعی می‌سازه
+------------------------------------------------------------------- */
+async function handleCaptionGenerate(request, env) {
+  const waitSec = await checkAiToolCooldown(env, 'caption_last_call');
+  if (waitSec > 0) {
+    return new Response(JSON.stringify({ ok: false, error: `لطفاً ${waitSec} ثانیه‌ی دیگر دوباره تلاش کنید.` }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+
+  let body;
+  try { body = await request.json(); } catch { body = {}; }
+  const text = (body.text || '').toString();
+  if (!text.trim()) {
+    return new Response(JSON.stringify({ ok: false, error: 'متن خبر خالی است.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+  if (!env.DEEPSEEK_API_KEY) {
+    return new Response(JSON.stringify({ ok: false, error: 'کلید DEEPSEEK_API_KEY تنظیم نشده است.' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+
+  const prompt = `متن خبر زیر را در نظر بگیر. برای هرکدام از شبکه‌های اجتماعی زیر، یک کپشن جداگانه و متناسب با سبک همان شبکه (شامل هشتگ‌های مناسب) به فارسی بساز:
+- اینستاگرام: کپشن جذاب و کمی احساسی، با ایموجی مناسب و چند هشتگ پرکاربرد مرتبط
+- تلگرام: خلاصه‌ی خبری مستقیم و رسمی‌تر، مناسب یک کانال خبری
+- ایکس (توییتر): کوتاه و مستقیم (حداکثر ۲۸۰ کاراکتر)، با ۲ تا ۳ هشتگ
+
+خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) با دقیقاً این ساختار بده:
+{"instagram": "...", "telegram": "...", "twitter": "..."}
+
+متن خبر:
+${safeTruncate(text, 1500)}`;
+
+  try {
+    const result = await callDeepSeekJson(env, prompt, 'تو فقط و فقط خروجی JSON معتبر تولید می‌کنی، بدون هیچ متن اضافه.');
+    return new Response(JSON.stringify({ ok: true, captions: result }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
+  }
+}
+
+// یه تابع مشترک برای فرستادن یه پرامپت به دیپ‌سیک و گرفتن جواب به‌صورت JSON پارس‌شده
+async function callDeepSeekJson(env, userPrompt, systemPrompt) {
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.4,
+    }),
+  });
+
+  const rawBody = await res.text();
+  if (!res.ok) throw new Error(`دیپ‌سیک خطای ${res.status} برگرداند: ${rawBody.slice(0, 300)}`);
+
+  let data;
+  try { data = JSON.parse(rawBody); } catch { throw new Error(`پاسخ دیپ‌سیک JSON معتبر نبود: ${rawBody.slice(0, 300)}`); }
+
+  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!content) throw new Error('پاسخ دیپ‌سیک ساختار مورد انتظار را نداشت: ' + rawBody.slice(0, 300));
+
+  const cleaned = stripLoneSurrogates(content.replace(/```json/g, '').replace(/```/g, '').trim());
+  return JSON.parse(cleaned);
+}
+
+/* -------------------------------------------------------------------
+   «ابر کلمات روز» — کاملاً محاسباتی، بدون AI، از اخبار امروز همون منطقه
+------------------------------------------------------------------- */
+async function handleWordCloud(env, region) {
+  const raw = await env.POSTS.get(postsKey(region));
+  const allPosts = raw ? JSON.parse(raw) : [];
+
+  const now = Date.now();
+  const periodStart = getIraqDayStartMs(now);
+  const todayPosts = allPosts.filter((p) => p.date >= periodStart && p.date <= now);
+
+  const words = computeTopWords(todayPosts, 40);
+
+  return new Response(JSON.stringify({ words, newsCount: todayPosts.length }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
 /* -------------------------------------------------------------------
