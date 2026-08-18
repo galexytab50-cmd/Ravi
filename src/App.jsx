@@ -95,14 +95,14 @@ input { font-family: inherit; }
 .iraf-ticker-viewport { overflow: hidden; direction: ltr; }
 .iraf-ticker-track {
   display: inline-flex; width: max-content; white-space: nowrap;
-  animation: iraf-ticker 40s linear infinite;
+  animation: iraf-ticker 70s linear infinite;
 }
 .iraf-ticker-item {
   color: #FFFFFF; font-size: 12px; font-weight: 600; padding-left: 50px; direction: rtl; unicode-bidi: plaintext;
 }
 @keyframes iraf-ticker {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  from { transform: translateX(-50%); }
+  to { transform: translateX(0); }
 }
 
 @media (max-width: 780px) {
@@ -196,7 +196,7 @@ function BreakingNewsTicker() {
 
   if (items.length === 0) return <div />;
 
-  const text = items.map((it) => it.text).join('   •   ');
+  const text = items.map((it) => it.text).join('   ***   ');
 
   const segment = (
     <span className="iraf-ticker-item">
@@ -380,7 +380,7 @@ function PostCard({ post }) {
             <div>
               {[
                 ['اینستاگرام', captionState.data.instagram],
-                ['تلگرام', captionState.data.telegram],
+                ['فیس‌بوک', captionState.data.facebook],
                 ['ایکس (توییتر)', captionState.data.twitter],
               ].map(([label, txt], i) => (
                 <div key={i} style={{ marginBottom: 16 }}>
@@ -508,7 +508,7 @@ function WordCloudSvg({ words }) {
   );
 }
 
-function WordCloudSection({ region }) {
+function WordCloudTab({ region }) {
   const [status, setStatus] = useState('idle'); // idle | loading | ready | empty | error
   const [words, setWords] = useState([]);
   const [newsCount, setNewsCount] = useState(0);
@@ -531,24 +531,27 @@ function WordCloudSection({ region }) {
   };
 
   return (
-    <div className="iraf-card" style={{ padding: 18, marginTop: 22 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Cloud size={16} color={C.gold} />
-          <span style={{ fontSize: 13, fontWeight: 800 }}>ابر کلمات روز</span>
-          {status === 'ready' && (
-            <span style={{ fontSize: 11, color: C.textFaint }}>· بر اساس {newsCount.toLocaleString('fa-IR')} خبر امروز</span>
-          )}
-        </div>
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
+        <span style={{ fontSize: 11.5, color: C.textFaint }}>
+          ابر کلمات پرتکرار اخبار امروز
+          {status === 'ready' && ` · بر اساس ${newsCount.toLocaleString('fa-IR')} خبر`}
+        </span>
         <button className="iraf-refresh-btn" onClick={generate} disabled={status === 'loading'}>
           <RefreshCw size={13} style={status === 'loading' ? { animation: 'iraf-spin 1s linear infinite' } : undefined} />
           {status === 'loading' ? 'در حال ساخت...' : 'تولید ابر کلمات'}
         </button>
       </div>
 
-      {status === 'error' && <div style={{ marginTop: 14, fontSize: 12.5, color: C.maroon }}>ارتباط با سرور برقرار نشد.</div>}
-      {status === 'empty' && <div style={{ marginTop: 14, fontSize: 12.5, color: C.textFaint }}>امروز هنوز خبری برای تحلیل نیست.</div>}
-      {status === 'ready' && <WordCloudSvg words={words} />}
+      {status === 'idle' && <StateBlock icon={<Cloud size={22} />} text="برای ساختن ابر کلمات، دکمه‌ی «تولید ابر کلمات» رو بزن." />}
+      {status === 'loading' && <StateBlock icon={<Loader2 size={22} style={{ animation: 'iraf-spin 1s linear infinite' }} />} text="در حال تحلیل اخبار امروز..." />}
+      {status === 'error' && <StateBlock icon={<WifiOff size={22} />} text="ارتباط با سرور برقرار نشد." color={C.maroon} />}
+      {status === 'empty' && <StateBlock icon={<Cloud size={22} />} text="امروز هنوز خبری برای تحلیل ثبت نشده است." />}
+      {status === 'ready' && (
+        <div className="iraf-card" style={{ padding: 18 }}>
+          <WordCloudSvg words={words} />
+        </div>
+      )}
     </div>
   );
 }
@@ -644,8 +647,6 @@ function LiveTab({ region }) {
       {status === 'error' && <StateBlock icon={<WifiOff size={22} />} text="ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید." color={C.maroon} />}
       {status === 'empty' && <StateBlock icon={<Newspaper size={22} />} text="هنوز خبری دریافت نشده. به محض انتشار پست جدید در کانال تلگرام، اینجا نمایش داده می‌شود." />}
       {status === 'ready' && <PostGrid posts={posts} />}
-
-      <WordCloudSection region={region} />
     </div>
   );
 }
@@ -1072,6 +1073,7 @@ function InfographicTab({ region }) {
 --------------------------------------------------------------------- */
 const TABS = [
   { key: 'live', label: 'پوشش زنده اخبار', icon: Newspaper },
+  { key: 'wordcloud', label: 'ابر کلمات روز', icon: Cloud },
   { key: 'archive', label: 'آرشیو مطالب', icon: Archive },
   { key: 'psyop', label: 'عملیات روانی', icon: ShieldAlert },
   { key: 'infographic', label: 'اینفوگرافیک', icon: ImageIcon },
@@ -1165,6 +1167,7 @@ function RegionPage() {
 
         <main style={{ flex: 1, minWidth: 0 }}>
           {validTab === 'live' && <LiveTab region={validRegion} />}
+          {validTab === 'wordcloud' && <WordCloudTab region={validRegion} />}
           {validTab === 'archive' && <ArchiveTab region={validRegion} />}
           {validTab === 'psyop' && <PsyopTab region={validRegion} />}
           {validTab === 'infographic' && <InfographicTab region={validRegion} />}
