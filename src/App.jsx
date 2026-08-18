@@ -4,6 +4,7 @@ import html2canvas from 'html2canvas';
 import {
   Newspaper, RefreshCw, ExternalLink, ImageOff, WifiOff, Loader2,
   Archive, ShieldAlert, CalendarDays, Hash, AlertTriangle, Image as ImageIcon, Download, Clock,
+  Film, MessageSquare, Cloud, X,
 } from 'lucide-react';
 import raviLogo from './assets/ravi-logo.png';
 
@@ -78,7 +79,15 @@ input { font-family: inherit; }
   border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600;
 }
 
-.iraf-post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; align-items: start; }
+.iraf-tool-btn {
+  display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1;
+  background: ${C.surface2}; color: ${C.gold}; border: 1px solid ${C.border}; border-radius: 7px;
+  padding: 7px 8px; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: background 0.15s ease;
+}
+.iraf-tool-btn:hover { background: ${C.goldSoft}; }
+.iraf-tool-btn:disabled { opacity: 0.6; cursor: default; }
+
+.iraf-post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; align-items: stretch; }
 @media (max-width: 700px) {
   .iraf-post-grid { grid-template-columns: 1fr; }
 }
@@ -207,14 +216,74 @@ function BreakingNewsTicker() {
 }
 
 /* ---------------------------------------------------------------------
+   پنجره‌ی مودال مشترک (برای نمایش نتیجه‌ی سناریو/کپشن)
+--------------------------------------------------------------------- */
+function Modal({ title, onClose, children }) {
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(13,13,60,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={onClose}
+    >
+      <div
+        className="iraf-scroll"
+        style={{ background: '#FFFFFF', borderRadius: 14, maxWidth: 560, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: '20px 22px', direction: 'rtl' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{title}</div>
+          <button onClick={onClose} style={{ background: C.surface2, border: 'none', borderRadius: 8, cursor: 'pointer', color: C.textMuted, padding: 6, display: 'flex' }}>
+            <X size={16} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
    کارت پست
 --------------------------------------------------------------------- */
 function PostCard({ post }) {
   const [imgFailed, setImgFailed] = useState(false);
+  const [scenarioState, setScenarioState] = useState(null); // null | {status, data, error}
+  const [captionState, setCaptionState] = useState(null);
   const dateMs = new Date(post.date).getTime();
 
+  const runScenario = async () => {
+    setScenarioState({ status: 'loading' });
+    try {
+      const res = await fetch('/api/scenario/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: post.text }),
+      });
+      const data = await res.json();
+      if (data.ok) setScenarioState({ status: 'ready', data: data.scenario });
+      else setScenarioState({ status: 'error', error: data.error || 'خطا در تولید سناریو.' });
+    } catch {
+      setScenarioState({ status: 'error', error: 'ارتباط با سرور برقرار نشد.' });
+    }
+  };
+
+  const runCaption = async () => {
+    setCaptionState({ status: 'loading' });
+    try {
+      const res = await fetch('/api/caption/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: post.text }),
+      });
+      const data = await res.json();
+      if (data.ok) setCaptionState({ status: 'ready', data: data.captions });
+      else setCaptionState({ status: 'error', error: data.error || 'خطا در تولید کپشن.' });
+    } catch {
+      setCaptionState({ status: 'error', error: 'ارتباط با سرور برقرار نشد.' });
+    }
+  };
+
   return (
-    <div className="iraf-card iraf-fadeup" style={{ width: '100%' }}>
+    <div className="iraf-card iraf-fadeup" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {post.photoUrl && !imgFailed && (
         <img
           src={post.photoUrl}
@@ -224,7 +293,7 @@ function PostCard({ post }) {
           style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block', borderBottom: `1px solid ${C.borderSoft}` }}
         />
       )}
-      <div style={{ padding: '13px 15px' }}>
+      <div style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', flex: 1 }}>
         {post.text && (
           <div style={{ fontSize: 13.5, lineHeight: 1.9, whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'justify' }}>
             {post.text}
@@ -235,7 +304,8 @@ function PostCard({ post }) {
             <ImageOff size={14} /> پیام بدون متن یا تصویر
           </div>
         )}
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+
+        <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span className="iraf-mono" style={{ fontSize: 10.5, color: C.textFaint }} title={new Date(post.date).toLocaleString('fa-IR')}>
             {timeAgoFa(dateMs)}
           </span>
@@ -245,7 +315,93 @@ function PostCard({ post }) {
             </a>
           )}
         </div>
+
+        {post.text && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="iraf-tool-btn" onClick={runScenario} disabled={scenarioState && scenarioState.status === 'loading'}>
+              <Film size={12} /> سناریو ساز
+            </button>
+            <button className="iraf-tool-btn" onClick={runCaption} disabled={captionState && captionState.status === 'loading'}>
+              <MessageSquare size={12} /> کپشن ساز
+            </button>
+          </div>
+        )}
       </div>
+
+      {scenarioState && (
+        <Modal title="سناریوی ویدیو" onClose={() => setScenarioState(null)}>
+          {scenarioState.status === 'loading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '30px 0', color: C.textFaint }}>
+              <Loader2 size={20} style={{ animation: 'iraf-spin 1s linear infinite' }} />
+              <span style={{ fontSize: 12.5 }}>در حال ساخت سناریو...</span>
+            </div>
+          )}
+          {scenarioState.status === 'error' && (
+            <div style={{ fontSize: 12.5, color: C.maroon, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertTriangle size={14} /> {scenarioState.error}
+            </div>
+          )}
+          {scenarioState.status === 'ready' && scenarioState.data && (
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>{scenarioState.data.title}</div>
+              <div style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 16 }}>
+                مدت تقریبی: {(scenarioState.data.totalDurationSeconds || 0).toLocaleString('fa-IR')} ثانیه · {(scenarioState.data.shots || []).length.toLocaleString('fa-IR')} شات
+              </div>
+              {(scenarioState.data.shots || []).map((s, i, arr) => (
+                <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < arr.length - 1 ? `1px solid ${C.borderSoft}` : 'none' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: C.gold, marginBottom: 5 }}>
+                    شات {(s.shotNumber || i + 1).toLocaleString('fa-IR')} · {(s.durationSeconds || 0).toLocaleString('fa-IR')} ثانیه
+                  </div>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.9, marginBottom: 6 }}>{s.narration}</div>
+                  <div style={{ fontSize: 11.5, color: C.textMuted, display: 'flex', gap: 6 }}>
+                    <Film size={12} style={{ flexShrink: 0, marginTop: 2 }} /> {s.visualSuggestion}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {captionState && (
+        <Modal title="کپشن شبکه‌های اجتماعی" onClose={() => setCaptionState(null)}>
+          {captionState.status === 'loading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '30px 0', color: C.textFaint }}>
+              <Loader2 size={20} style={{ animation: 'iraf-spin 1s linear infinite' }} />
+              <span style={{ fontSize: 12.5 }}>در حال ساخت کپشن...</span>
+            </div>
+          )}
+          {captionState.status === 'error' && (
+            <div style={{ fontSize: 12.5, color: C.maroon, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertTriangle size={14} /> {captionState.error}
+            </div>
+          )}
+          {captionState.status === 'ready' && captionState.data && (
+            <div>
+              {[
+                ['اینستاگرام', captionState.data.instagram],
+                ['تلگرام', captionState.data.telegram],
+                ['ایکس (توییتر)', captionState.data.twitter],
+              ].map(([label, txt], i) => (
+                <div key={i} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 800 }}>{label}</span>
+                    <button
+                      onClick={() => navigator.clipboard && navigator.clipboard.writeText(txt || '')}
+                      style={{ fontSize: 11, color: C.gold, background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                    >
+                      کپی
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.9, background: C.surface2, borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
+                    {txt}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -265,6 +421,134 @@ function StateBlock({ icon, text, color }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '70px 0', color: color || C.textFaint }}>
       {icon}
       <span style={{ fontSize: 13 }}>{text}</span>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   ابر کلمات روز — چیدمان مارپیچی با اندازه‌ی متناسب با تکرار، کاملاً با SVG
+--------------------------------------------------------------------- */
+function WordCloudSvg({ words }) {
+  const width = 760;
+  const height = 320;
+  const colors = [C.gold, C.maroon, '#0D0D6E', C.textMuted, '#7A2E8C'];
+
+  const layout = React.useMemo(() => {
+    if (!words || words.length === 0) return [];
+    const sorted = [...words].sort((a, b) => b.count - a.count);
+    const maxCount = sorted[0].count;
+    const minCount = sorted[sorted.length - 1].count;
+    const minFont = 14;
+    const maxFont = 52;
+    const scale = (c) => (minCount === maxCount ? (minFont + maxFont) / 2 : minFont + ((c - minCount) / (maxCount - minCount)) * (maxFont - minFont));
+
+    let ctx = null;
+    try {
+      const canvas = document.createElement('canvas');
+      ctx = canvas.getContext('2d');
+    } catch {
+      ctx = null;
+    }
+
+    const placed = [];
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const results = [];
+
+    sorted.forEach((w, idx) => {
+      const fontSize = scale(w.count);
+      let boxW;
+      if (ctx) {
+        ctx.font = `800 ${fontSize}px Vazirmatn, sans-serif`;
+        boxW = ctx.measureText(w.word).width + 10;
+      } else {
+        boxW = w.word.length * fontSize * 0.62 + 10;
+      }
+      const boxH = fontSize * 1.25;
+
+      let angle = idx * 0.6;
+      let radius = 0;
+      let x = centerX;
+      let y = centerY;
+
+      for (let attempt = 0; attempt < 1500; attempt++) {
+        x = centerX + radius * Math.cos(angle) - boxW / 2;
+        y = centerY + radius * Math.sin(angle) - boxH / 2;
+        const collides = placed.some((p) => !(x + boxW < p.x || p.x + p.w < x || y + boxH < p.y || p.y + p.h < y));
+        if (!collides) break;
+        angle += 0.28;
+        radius += 2.2;
+      }
+
+      placed.push({ x, y, w: boxW, h: boxH });
+      results.push({ word: w.word, count: w.count, fontSize, x: x + boxW / 2, y: y + boxH / 2, color: colors[idx % colors.length] });
+    });
+
+    return results;
+  }, [words]);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', marginTop: 14 }}>
+      {layout.map((item, i) => (
+        <text
+          key={i}
+          x={item.x}
+          y={item.y}
+          fontSize={item.fontSize}
+          fontWeight="800"
+          fill={item.color}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          style={{ fontFamily: "'Vazirmatn', sans-serif" }}
+        >
+          {item.word}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+function WordCloudSection({ region }) {
+  const [status, setStatus] = useState('idle'); // idle | loading | ready | empty | error
+  const [words, setWords] = useState([]);
+  const [newsCount, setNewsCount] = useState(0);
+
+  const generate = async () => {
+    setStatus('loading');
+    try {
+      const res = await fetch(`/api/wordcloud?region=${region}`);
+      const data = await res.json();
+      if (data.words && data.words.length > 0) {
+        setWords(data.words);
+        setNewsCount(data.newsCount || 0);
+        setStatus('ready');
+      } else {
+        setStatus('empty');
+      }
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div className="iraf-card" style={{ padding: 18, marginTop: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Cloud size={16} color={C.gold} />
+          <span style={{ fontSize: 13, fontWeight: 800 }}>ابر کلمات روز</span>
+          {status === 'ready' && (
+            <span style={{ fontSize: 11, color: C.textFaint }}>· بر اساس {newsCount.toLocaleString('fa-IR')} خبر امروز</span>
+          )}
+        </div>
+        <button className="iraf-refresh-btn" onClick={generate} disabled={status === 'loading'}>
+          <RefreshCw size={13} style={status === 'loading' ? { animation: 'iraf-spin 1s linear infinite' } : undefined} />
+          {status === 'loading' ? 'در حال ساخت...' : 'تولید ابر کلمات'}
+        </button>
+      </div>
+
+      {status === 'error' && <div style={{ marginTop: 14, fontSize: 12.5, color: C.maroon }}>ارتباط با سرور برقرار نشد.</div>}
+      {status === 'empty' && <div style={{ marginTop: 14, fontSize: 12.5, color: C.textFaint }}>امروز هنوز خبری برای تحلیل نیست.</div>}
+      {status === 'ready' && <WordCloudSvg words={words} />}
     </div>
   );
 }
@@ -360,6 +644,8 @@ function LiveTab({ region }) {
       {status === 'error' && <StateBlock icon={<WifiOff size={22} />} text="ارتباط با سرور برقرار نشد. لطفاً دوباره تلاش کنید." color={C.maroon} />}
       {status === 'empty' && <StateBlock icon={<Newspaper size={22} />} text="هنوز خبری دریافت نشده. به محض انتشار پست جدید در کانال تلگرام، اینجا نمایش داده می‌شود." />}
       {status === 'ready' && <PostGrid posts={posts} />}
+
+      <WordCloudSection region={region} />
     </div>
   );
 }
