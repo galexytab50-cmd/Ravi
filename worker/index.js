@@ -54,17 +54,8 @@ export default {
     const path = url.pathname;
     const region = normalizeRegion(url.searchParams.get('region'));
 
-    if (path === '/api/telegram-webhook') {
-      if (request.method === 'POST') return handleWebhook(request, env);
-      return new Response('Telegram webhook is alive. Use POST.', { status: 200 });
-    }
-
     if (path === '/api/telegram-posts' && request.method === 'GET') {
       return handlePosts(env, region);
-    }
-
-    if (path === '/api/telegram-media' && request.method === 'GET') {
-      return handleMedia(request, env);
     }
 
     if (path === '/api/archive' && request.method === 'GET') {
@@ -103,66 +94,6 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
-
-/* -------------------------------------------------------------------
-   وبهوک تلگرام: دریافت پست جدید و ذخیره در KV (بدون هیچ فیلتری)
-------------------------------------------------------------------- */
-async function handleWebhook(request, env) {
-  const secretHeader = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-  if (!env.WEBHOOK_SECRET || secretHeader !== env.WEBHOOK_SECRET) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
-  let update;
-  try {
-    update = await request.json();
-  } catch {
-    return new Response('Bad Request', { status: 400 });
-  }
-
-  const msg = update.channel_post || update.edited_channel_post;
-  if (!msg) {
-    return new Response('OK', { status: 200 });
-  }
-
-  const text = msg.text || msg.caption || '';
-  const sourceUsername = msg.chat && msg.chat.username ? msg.chat.username : null;
-
-  let photoFileId = null;
-  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
-    photoFileId = msg.photo[msg.photo.length - 1].file_id;
-  }
-
-  const post = {
-    id: `${msg.chat.id}_${msg.message_id}`,
-    messageId: msg.message_id,
-    text,
-    date: msg.date * 1000,
-    photoFileId,
-    photoUrl: photoFileId ? `/api/telegram-media?file_id=${encodeURIComponent(photoFileId)}` : null,
-    link: sourceUsername ? `https://t.me/${sourceUsername}/${msg.message_id}` : null,
-  };
-
-  const existingRaw = await env.POSTS.get(KV_KEY);
-  let list = [];
-  if (existingRaw) {
-    try { list = JSON.parse(existingRaw); } catch { list = []; }
-  }
-
-  const idx = list.findIndex((p) => p.id === post.id);
-  if (idx >= 0) {
-    list[idx] = post;
-  } else {
-    list.unshift(post);
-  }
-
-  list.sort((a, b) => b.date - a.date);
-  list = list.slice(0, MAX_STORED_POSTS);
-
-  await env.POSTS.put(KV_KEY, JSON.stringify(list));
-
-  return new Response('OK', { status: 200 });
-}
 
 /* -------------------------------------------------------------------
    نوار «خبر فوری» — از صفحه‌ی عمومی پیش‌نمایش تلگرام می‌خونه، به فارسی
@@ -344,10 +275,11 @@ async function handleClearPosts(request, env, region) {
 }
 
 /* -------------------------------------------------------------------
-   خوندن کانال‌های عمومی که ربات ادمینشون نیست (مثل SyriaMonitoring برای راوی سوریه)
-   از صفحه‌ی پیش‌نمایش عمومی تلگرام، بدون نیاز به ترجمه.
+   خوندن کانال‌های عمومی از صفحه‌ی پیش‌نمایش عمومی تلگرام (بدون نیاز به ربات/ادمین).
+   فقط متن پیام‌ها استخراج می‌شه، بدون عکس.
 ------------------------------------------------------------------- */
 const SCRAPED_CHANNELS_BY_REGION = {
+  iraq: 'Pulse0fIraq',
   syria: 'SyriaMonitoring',
 };
 const SCRAPE_INTERVAL_MS = 3 * 60 * 1000; // حداکثر هر ۳ دقیقه یک بار اسکرپ می‌شه
@@ -368,10 +300,9 @@ async function scrapeChannelPosts(channelUsername) {
 
     const textMatch = chunk.match(/class="tgme_widget_message_text js-message_text"[^>]*>([\s\S]*?)<\/div>/);
     const timeMatch = chunk.match(/<time datetime="([^"]+)"/);
-    const photoMatch = chunk.match(/tgme_widget_message_photo_wrap"[^>]*style="[^"]*background-image:url\('([^']+)'\)/);
 
     const text = textMatch ? stripHtmlTags(textMatch[1]) : '';
-    if (!text && !photoMatch) continue;
+    if (!text) continue;
 
     const messageIdStr = postMatch[1].split('/')[1];
 
@@ -381,7 +312,7 @@ async function scrapeChannelPosts(channelUsername) {
       text,
       date: timeMatch ? new Date(timeMatch[1]).getTime() : Date.now(),
       photoFileId: null,
-      photoUrl: photoMatch ? photoMatch[1] : null,
+      photoUrl: null,
       link: `https://t.me/${postMatch[1]}`,
     });
   }
@@ -431,10 +362,15 @@ async function handlePosts(env, region) {
   await maybeScrapeChannelForRegion(env, region);
 
   const raw = await env.POSTS.get(postsKey(region));
-  let posts = [];
+  let allPosts = [];
   if (raw) {
-    try { posts = JSON.parse(raw); } catch { posts = []; }
+    try { allPosts = JSON.parse(raw); } catch { allPosts = []; }
   }
+
+  // فقط اخبار «امروز» (به وقت عراق) تو پوشش زنده نمایش داده می‌شه؛ بقیه از تب آرشیو در دسترسه.
+  const now = Date.now();
+  const todayStart = getIraqDayStartMs(now);
+  const posts = allPosts.filter((p) => p.date >= todayStart && p.date <= now);
 
   return new Response(JSON.stringify({ posts }), {
     status: 200,
@@ -883,38 +819,4 @@ async function handleWordCloud(env, region) {
     status: 200,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
-}
-
-/* -------------------------------------------------------------------
-   پروکسی امن عکس‌های تلگرام
-------------------------------------------------------------------- */
-async function handleMedia(request, env) {
-  const url = new URL(request.url);
-  const fileId = url.searchParams.get('file_id');
-
-  if (!fileId) return new Response('Missing file_id', { status: 400 });
-  if (!env.BOT_TOKEN) return new Response('Server not configured', { status: 500 });
-
-  try {
-    const getFileRes = await fetch(
-      `https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`
-    );
-    const getFileData = await getFileRes.json();
-    if (!getFileData.ok) return new Response('File not found', { status: 404 });
-
-    const filePath = getFileData.result.file_path;
-    const fileRes = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`);
-    if (!fileRes.ok) return new Response('Failed to fetch file', { status: 502 });
-
-    const contentType = fileRes.headers.get('Content-Type') || 'image/jpeg';
-    return new Response(fileRes.body, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=86400, immutable',
-      },
-    });
-  } catch {
-    return new Response('Error fetching media', { status: 500 });
-  }
 }
