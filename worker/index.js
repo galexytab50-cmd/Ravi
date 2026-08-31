@@ -52,48 +52,220 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
-    const region = normalizeRegion(url.searchParams.get('region'));
 
-    if (path === '/api/telegram-posts' && request.method === 'GET') {
-      return handlePosts(env, region);
+    // ---------- مسیرهای عمومی (بدون نیاز به ورود) ----------
+    if (path === '/api/auth/login' && request.method === 'POST') {
+      return handleLogin(request, env);
+    }
+    if (path === '/api/auth/bootstrap-admin' && request.method === 'POST') {
+      return handleBootstrapAdmin(request, env);
     }
 
-    if (path === '/api/archive' && request.method === 'GET') {
-      return handleArchive(request, env, region);
-    }
+    // ---------- بقیه‌ی مسیرهای /api/* نیاز به ورود دارن ----------
+    if (path.startsWith('/api/')) {
+      const session = await getSession(request, env);
+      if (!session) {
+        return jsonResp({ ok: false, error: 'لطفاً ابتدا وارد شوید.' }, 401);
+      }
 
-    if (path === '/api/psyop-report' && request.method === 'GET') {
-      return handlePsyopReportGet(env, region);
-    }
+      if (path === '/api/auth/logout' && request.method === 'POST') return handleLogout(request, env);
+      if (path === '/api/auth/me' && request.method === 'GET') return handleMe(session);
 
-    if (path === '/api/psyop-report/generate' && request.method === 'POST') {
-      return handlePsyopReportGenerate(request, env, region);
-    }
+      if (path === '/api/admin/users' && request.method === 'GET') return handleListUsers(session, env);
+      if (path === '/api/admin/users' && request.method === 'POST') return handleCreateUser(request, session, env);
+      if (path === '/api/admin/users' && request.method === 'DELETE') return handleDeleteUser(request, session, env);
 
-    if (path === '/api/breaking-news' && request.method === 'GET') {
-      return handleBreakingNewsGet(env);
-    }
+      // کاربر «منطقه‌ای» فقط به منطقه‌ی خودش دسترسی داره، صرف‌نظر از چیزی که تو URL بخواد
+      const requestedRegion = normalizeRegion(url.searchParams.get('region'));
+      const region = session.role === 'admin' ? requestedRegion : (session.region || 'iraq');
 
-    if (path === '/api/admin/clear-posts' && request.method === 'POST') {
-      return handleClearPosts(request, env, region);
-    }
+      if (path === '/api/telegram-posts' && request.method === 'GET') return handlePosts(env, region);
+      if (path === '/api/archive' && request.method === 'GET') return handleArchive(request, env, region);
+      if (path === '/api/psyop-report' && request.method === 'GET') return handlePsyopReportGet(env, region);
+      if (path === '/api/psyop-report/generate' && request.method === 'POST') return handlePsyopReportGenerate(request, env, region);
+      if (path === '/api/breaking-news' && request.method === 'GET') return handleBreakingNewsGet(env);
+      if (path === '/api/admin/clear-posts' && request.method === 'POST') return handleClearPosts(env, region);
+      if (path === '/api/scenario/generate' && request.method === 'POST') return handleScenarioGenerate(request, env);
+      if (path === '/api/caption/generate' && request.method === 'POST') return handleCaptionGenerate(request, env);
+      if (path === '/api/wordcloud' && request.method === 'GET') return handleWordCloud(env, region);
 
-    if (path === '/api/scenario/generate' && request.method === 'POST') {
-      return handleScenarioGenerate(request, env);
-    }
-
-    if (path === '/api/caption/generate' && request.method === 'POST') {
-      return handleCaptionGenerate(request, env);
-    }
-
-    if (path === '/api/wordcloud' && request.method === 'GET') {
-      return handleWordCloud(env, region);
+      return jsonResp({ ok: false, error: 'مسیر یافت نشد.' }, 404);
     }
 
     // هر درخواست دیگه‌ای -> فایل‌های استاتیک ساخته‌شده توسط Vite (پوشه‌ی dist)
     return env.ASSETS.fetch(request);
   },
 };
+
+/* -------------------------------------------------------------------
+   احراز هویت و مدیریت کاربران
+------------------------------------------------------------------- */
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // ۳۰ روز
+
+function jsonResp(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return bytes;
+}
+
+// هش‌کردن رمز عبور با PBKDF2 (Web Crypto API که تو Cloudflare Workers هم در دسترسه)
+async function hashPassword(password, saltHex) {
+  const enc = new TextEncoder();
+  const salt = saltHex ? hexToBytes(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  return { hash: bytesToHex(new Uint8Array(bits)), salt: bytesToHex(salt) };
+}
+
+async function verifyPassword(password, saltHex, expectedHashHex) {
+  const { hash } = await hashPassword(password, saltHex);
+  return hash === expectedHashHex;
+}
+
+async function getSession(request, env) {
+  const authHeader = request.headers.get('Authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return null;
+  const raw = await env.POSTS.get(`session:${token}`);
+  if (!raw) return null;
+  try {
+    const session = JSON.parse(raw);
+    session.token = token;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+async function handleLogin(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'بدنه‌ی درخواست نامعتبر است.' }, 400); }
+
+  const username = (body.username || '').trim();
+  const password = body.password || '';
+  if (!username || !password) return jsonResp({ ok: false, error: 'نام‌کاربری و رمز عبور را وارد کنید.' }, 400);
+
+  const raw = await env.POSTS.get(`user:${username}`);
+  if (!raw) return jsonResp({ ok: false, error: 'نام‌کاربری یا رمز عبور اشتباه است.' }, 401);
+
+  const user = JSON.parse(raw);
+  const valid = await verifyPassword(password, user.salt, user.hash);
+  if (!valid) return jsonResp({ ok: false, error: 'نام‌کاربری یا رمز عبور اشتباه است.' }, 401);
+
+  const token = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+  await env.POSTS.put(
+    `session:${token}`,
+    JSON.stringify({ username: user.username, role: user.role, region: user.region || null }),
+    { expirationTtl: SESSION_TTL_SECONDS }
+  );
+
+  return jsonResp({ ok: true, token, username: user.username, role: user.role, region: user.region || null });
+}
+
+async function handleLogout(request, env) {
+  const authHeader = request.headers.get('Authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) await env.POSTS.delete(`session:${token}`);
+  return jsonResp({ ok: true });
+}
+
+function handleMe(session) {
+  return jsonResp({ ok: true, username: session.username, role: session.role, region: session.region || null });
+}
+
+// ساخت اولین حساب مدیر — فقط یک‌بار قابل‌استفاده‌ست (اگه مدیری از قبل وجود داشته باشه رد می‌شه)
+// و با WEBHOOK_SECRET محافظت می‌شه، نه با session (چون اولین ورودِ به سیستمه).
+async function handleBootstrapAdmin(request, env) {
+  const secretHeader = request.headers.get('X-Setup-Secret');
+  if (!env.WEBHOOK_SECRET || secretHeader !== env.WEBHOOK_SECRET) {
+    return jsonResp({ ok: false, error: 'رمز راه‌اندازی نادرست است.' }, 401);
+  }
+
+  const list = await env.POSTS.list({ prefix: 'user:' });
+  for (const k of list.keys) {
+    const raw = await env.POSTS.get(k.name);
+    if (raw) {
+      const u = JSON.parse(raw);
+      if (u.role === 'admin') return jsonResp({ ok: false, error: 'یک حساب مدیر از قبل وجود دارد.' }, 400);
+    }
+  }
+
+  let body;
+  try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'بدنه‌ی درخواست نامعتبر است.' }, 400); }
+  const username = (body.username || '').trim();
+  const password = body.password || '';
+  if (!username || !password) return jsonResp({ ok: false, error: 'نام‌کاربری و رمز عبور را وارد کنید.' }, 400);
+
+  const { hash, salt } = await hashPassword(password);
+  await env.POSTS.put(`user:${username}`, JSON.stringify({ username, hash, salt, role: 'admin', region: null }));
+
+  return jsonResp({ ok: true });
+}
+
+async function handleListUsers(session, env) {
+  if (session.role !== 'admin') return jsonResp({ ok: false, error: 'دسترسی ندارید.' }, 403);
+
+  const list = await env.POSTS.list({ prefix: 'user:' });
+  const users = [];
+  for (const k of list.keys) {
+    const raw = await env.POSTS.get(k.name);
+    if (raw) {
+      const u = JSON.parse(raw);
+      users.push({ username: u.username, role: u.role, region: u.region || null });
+    }
+  }
+  users.sort((a, b) => a.username.localeCompare(b.username));
+  return jsonResp({ ok: true, users });
+}
+
+async function handleCreateUser(request, session, env) {
+  if (session.role !== 'admin') return jsonResp({ ok: false, error: 'دسترسی ندارید.' }, 403);
+
+  let body;
+  try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'بدنه‌ی درخواست نامعتبر است.' }, 400); }
+
+  const username = (body.username || '').trim();
+  const password = body.password || '';
+  const role = body.role === 'admin' ? 'admin' : 'region';
+  const region = role === 'region' ? normalizeRegion(body.region) : null;
+
+  if (!username || !password) return jsonResp({ ok: false, error: 'نام‌کاربری و رمز عبور الزامی است.' }, 400);
+  if (password.length < 6) return jsonResp({ ok: false, error: 'رمز عبور باید حداقل ۶ کاراکتر باشد.' }, 400);
+
+  const existing = await env.POSTS.get(`user:${username}`);
+  if (existing) return jsonResp({ ok: false, error: 'این نام‌کاربری قبلاً استفاده شده است.' }, 400);
+
+  const { hash, salt } = await hashPassword(password);
+  await env.POSTS.put(`user:${username}`, JSON.stringify({ username, hash, salt, role, region }));
+
+  return jsonResp({ ok: true });
+}
+
+async function handleDeleteUser(request, session, env) {
+  if (session.role !== 'admin') return jsonResp({ ok: false, error: 'دسترسی ندارید.' }, 403);
+
+  const url = new URL(request.url);
+  const username = url.searchParams.get('username');
+  if (!username) return jsonResp({ ok: false, error: 'نام‌کاربری مشخص نشده.' }, 400);
+  if (username === session.username) return jsonResp({ ok: false, error: 'نمی‌توانید حساب خودتان را حذف کنید.' }, 400);
+
+  await env.POSTS.delete(`user:${username}`);
+  return jsonResp({ ok: true });
+}
 
 /* -------------------------------------------------------------------
    نوار «خبر فوری» — از صفحه‌ی عمومی پیش‌نمایش تلگرام می‌خونه، به فارسی
@@ -257,21 +429,11 @@ ${numbered}`;
 // پاک‌کردن کامل اخبار ذخیره‌شده (پوشش زنده + آرشیو، چون هر دو از همین کلید می‌خونن).
 // عملی غیرقابل‌بازگشته، برای همین با همون WEBHOOK_SECRET محافظت می‌شه
 // و کلید رو تو خودِ مرورگر ذخیره نمی‌کنیم — هر بار باید واردش کنی.
-async function handleClearPosts(request, env, region) {
-  const secretHeader = request.headers.get('X-Admin-Secret');
-  if (!env.WEBHOOK_SECRET || secretHeader !== env.WEBHOOK_SECRET) {
-    return new Response(JSON.stringify({ ok: false, error: 'رمز نادرست است.' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
-  }
-
+// دیگه نیازی به رمز جدا نیست — همین که کاربر وارد شده و به این منطقه دسترسی داره کافیه
+// (این چک‌ها تو خودِ fetch() قبل از رسیدن به اینجا انجام می‌شه).
+async function handleClearPosts(env, region) {
   await env.POSTS.delete(postsKey(region));
-
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  return jsonResp({ ok: true });
 }
 
 /* -------------------------------------------------------------------
