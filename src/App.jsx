@@ -1110,7 +1110,7 @@ function RegionPage() {
       <div style={{ background: '#0D0D6E' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {validRegion === 'iraq' && <BreakingNewsTicker />}
+            {(validRegion === 'iraq' || validRegion === 'syria') && <BreakingNewsTicker />}
           </div>
           <LiveClock timeZone={clockInfo.timeZone} label={clockInfo.label} />
         </div>
