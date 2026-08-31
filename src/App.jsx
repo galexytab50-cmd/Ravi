@@ -141,6 +141,7 @@ function todayIsoDate() {
 --------------------------------------------------------------------- */
 const REGION_CLOCKS = {
   iraq: { timeZone: 'Asia/Baghdad', label: 'به‌وقت بغداد' },
+  syria: { timeZone: 'Asia/Damascus', label: 'به‌وقت دمشق' },
   usa: { timeZone: 'America/Chicago', label: 'به‌وقت مرکزی آمریکا' },
   europe: { timeZone: 'Europe/London', label: 'به‌وقت لندن' },
   latam: { timeZone: 'America/Caracas', label: 'به‌وقت ونزوئلا' },
@@ -1081,6 +1082,7 @@ const TABS = [
 
 const REGIONS = [
   { key: 'iraq', label: 'راوی عراق' },
+  { key: 'syria', label: 'راوی سوریه' },
   { key: 'usa', label: 'راوی آمریکا' },
   { key: 'europe', label: 'راوی اروپا' },
   { key: 'latam', label: 'راوی آمریکای لاتین' },
