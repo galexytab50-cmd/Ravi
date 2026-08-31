@@ -4,9 +4,28 @@ import html2canvas from 'html2canvas';
 import {
   Newspaper, RefreshCw, ExternalLink, ImageOff, WifiOff, Loader2,
   Archive, ShieldAlert, CalendarDays, Hash, AlertTriangle, Image as ImageIcon, Download, Clock,
-  Film, MessageSquare, Cloud, X,
+  Film, MessageSquare, Cloud, X, LogOut, Users, Trash2, Plus, Lock, User,
 } from 'lucide-react';
 import raviLogo from './assets/ravi-logo.png';
+
+/* ---------------------------------------------------------------------
+   احراز هویت — ذخیره‌ی توکن و ارسال خودکارش با هر درخواست API
+--------------------------------------------------------------------- */
+const TOKEN_STORAGE_KEY = 'ravi_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+}
+function setToken(token) {
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+function clearToken() {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+function authFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}), Authorization: `Bearer ${getToken()}` };
+  return fetch(url, { ...options, headers });
+}
 
 /* ---------------------------------------------------------------------
    هویت بصری — راوی (بر اساس رنگ لوگو: آبی سرمه‌ای)
@@ -105,6 +124,13 @@ input { font-family: inherit; }
   to { transform: translateX(0); }
 }
 
+.iraf-text-input {
+  width: 100%; font-family: inherit; border: 1px solid ${C.border}; border-radius: 8px;
+  padding: 9px 12px; font-size: 13px; color: ${C.text}; background: ${C.surface};
+  box-sizing: border-box;
+}
+.iraf-text-input:focus { outline: 2px solid ${C.goldSoft}; border-color: ${C.gold}; }
+
 @media (max-width: 780px) {
   .iraf-layout { flex-direction: column; }
   .iraf-sidebar { width: 100%; flex-direction: row; overflow-x: auto; position: static; }
@@ -112,6 +138,9 @@ input { font-family: inherit; }
 }
 @media (max-width: 640px) {
   .iraf-layout { padding: 16px 14px 50px !important; }
+  .iraf-header-slogan { display: none !important; }
+  .iraf-header-inner { gap: 10px !important; padding: 8px 12px !important; }
+  .iraf-admin-form-grid { grid-template-columns: 1fr !important; }
 }
 `;
 
@@ -183,7 +212,7 @@ function BreakingNewsTicker() {
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch('/api/breaking-news');
+        const res = await authFetch('/api/breaking-news');
         const data = await res.json();
         if (!cancelled && Array.isArray(data.items)) setItems(data.items);
       } catch {
@@ -254,7 +283,7 @@ function PostCard({ post }) {
   const runScenario = async () => {
     setScenarioState({ status: 'loading' });
     try {
-      const res = await fetch('/api/scenario/generate', {
+      const res = await authFetch('/api/scenario/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: post.text }),
@@ -270,7 +299,7 @@ function PostCard({ post }) {
   const runCaption = async () => {
     setCaptionState({ status: 'loading' });
     try {
-      const res = await fetch('/api/caption/generate', {
+      const res = await authFetch('/api/caption/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: post.text }),
@@ -517,7 +546,7 @@ function WordCloudTab({ region }) {
   const generate = async () => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/wordcloud?region=${region}`);
+      const res = await authFetch(`/api/wordcloud?region=${region}`);
       const data = await res.json();
       if (data.words && data.words.length > 0) {
         setWords(data.words);
@@ -571,7 +600,7 @@ function LiveTab({ region }) {
   const load = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const res = await fetch(`/api/telegram-posts?region=${region}`);
+      const res = await authFetch(`/api/telegram-posts?region=${region}`);
       const data = await res.json();
       if (cancelledRef.current) return;
       if (data.posts && data.posts.length > 0) {
@@ -601,15 +630,9 @@ function LiveTab({ region }) {
     const confirmed = window.confirm('همه‌ی اخبار ذخیره‌شده (پوشش زنده و آرشیو) برای همیشه پاک می‌شود. مطمئنی؟');
     if (!confirmed) return;
 
-    const secret = window.prompt('برای تأیید، رمز مدیریتی (WEBHOOK_SECRET) را وارد کن:');
-    if (!secret) return;
-
     setClearing(true);
     try {
-      const res = await fetch(`/api/admin/clear-posts?region=${region}`, {
-        method: 'POST',
-        headers: { 'X-Admin-Secret': secret },
-      });
+      const res = await authFetch(`/api/admin/clear-posts?region=${region}`, { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
         setPosts([]);
@@ -663,7 +686,7 @@ function ArchiveTab({ region }) {
   const loadDate = async (d) => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/archive?region=${region}&date=${encodeURIComponent(d)}`);
+      const res = await authFetch(`/api/archive?region=${region}&date=${encodeURIComponent(d)}`);
       const data = await res.json();
       if (data.posts && data.posts.length > 0) {
         setPosts(data.posts);
@@ -732,7 +755,7 @@ function PsyopTab({ region }) {
   const load = async () => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/psyop-report?region=${region}`);
+      const res = await authFetch(`/api/psyop-report?region=${region}`);
       const data = await res.json();
       if (data.report) {
         setReport(data.report);
@@ -751,7 +774,7 @@ function PsyopTab({ region }) {
     setGenerating(true);
     setGenerateError(null);
     try {
-      const res = await fetch(`/api/psyop-report/generate?region=${region}`, { method: 'POST' });
+      const res = await authFetch(`/api/psyop-report/generate?region=${region}`, { method: 'POST' });
       const data = await res.json();
       if (data.ok && data.report) {
         setReport(data.report);
@@ -891,7 +914,7 @@ function InfographicTab({ region }) {
   const load = async () => {
     setStatus('loading');
     try {
-      const res = await fetch(`/api/psyop-report?region=${region}`);
+      const res = await authFetch(`/api/psyop-report?region=${region}`);
       const data = await res.json();
       if (data.report) {
         setReport(data.report);
@@ -1088,11 +1111,280 @@ const REGIONS = [
   { key: 'latam', label: 'راوی آمریکای لاتین' },
 ];
 
-function RegionPage() {
+/* ---------------------------------------------------------------------
+   صفحه‌ی ورود
+--------------------------------------------------------------------- */
+function LoginPage({ onLoggedIn }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setToken(data.token);
+        onLoggedIn({ username: data.username, role: data.role, region: data.region });
+      } else {
+        setError(data.error || 'ورود ناموفق بود.');
+      }
+    } catch {
+      setError('ارتباط با سرور برقرار نشد.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="iraf-root" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <style>{FONT_IMPORT}</style>
+      <form onSubmit={handleSubmit} className="iraf-card" style={{ padding: '32px 28px', width: '100%', maxWidth: 380 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <img src={raviLogo} alt="راوی" style={{ height: 58 }} />
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, textAlign: 'center', marginBottom: 22, color: C.gold }}>ورود به راوی</div>
+
+        {error && (
+          <div style={{ background: C.maroonSoft, color: C.maroon, padding: '9px 12px', borderRadius: 8, fontSize: 12.5, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={14} /> {error}
+          </div>
+        )}
+
+        <label style={{ fontSize: 12, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+          <User size={13} /> نام‌کاربری
+        </label>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="iraf-text-input"
+          style={{ marginBottom: 14 }}
+          autoFocus
+          required
+        />
+
+        <label style={{ fontSize: 12, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+          <Lock size={13} /> رمز عبور
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="iraf-text-input"
+          style={{ marginBottom: 22 }}
+          required
+        />
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="iraf-refresh-btn"
+          style={{ width: '100%', justifyContent: 'center', background: C.gold, color: '#FFFFFF', padding: '11px 0', fontSize: 13.5 }}
+        >
+          {loading ? 'در حال ورود...' : 'ورود'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   پنل مدیریت کاربران (فقط برای مدیر کل)
+--------------------------------------------------------------------- */
+function AdminUsersPage({ user, onLogout }) {
+  const [users, setUsers] = useState([]);
+  const [status, setStatus] = useState('loading');
+  const [formOpen, setFormOpen] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState('region');
+  const [newRegion, setNewRegion] = useState('iraq');
+  const [formError, setFormError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setStatus('loading');
+    try {
+      const res = await authFetch('/api/admin/users');
+      const data = await res.json();
+      if (data.ok) {
+        setUsers(data.users);
+        setStatus('ready');
+      } else {
+        setStatus('error');
+      }
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+    try {
+      const res = await authFetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole, region: newRegion }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setNewUsername('');
+        setNewPassword('');
+        setNewRole('region');
+        setNewRegion('iraq');
+        setFormOpen(false);
+        load();
+      } else {
+        setFormError(data.error || 'ساخت کاربر با خطا مواجه شد.');
+      }
+    } catch {
+      setFormError('ارتباط با سرور برقرار نشد.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (username) => {
+    const confirmed = window.confirm(`کاربر «${username}» برای همیشه حذف شود؟`);
+    if (!confirmed) return;
+    try {
+      const res = await authFetch(`/api/admin/users?username=${encodeURIComponent(username)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.ok) load();
+      else window.alert(data.error || 'حذف کاربر با خطا مواجه شد.');
+    } catch {
+      window.alert('ارتباط با سرور برقرار نشد.');
+    }
+  };
+
+  const regionLabel = (key) => (REGIONS.find((r) => r.key === key) || {}).label || key;
+
+  return (
+    <div className="iraf-root">
+      <style>{FONT_IMPORT}</style>
+
+      <div style={{ background: '#FFFFFF', borderBottom: `2px solid ${C.gold}` }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 20px', flexWrap: 'wrap' }}>
+          <Link to="/iraq/live" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}>
+            <img src={raviLogo} alt="راوی" style={{ height: 46, width: 'auto', display: 'block' }} />
+          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12.5, color: C.textMuted }}>{user.username}</span>
+            <button className="iraf-refresh-btn" onClick={onLogout}><LogOut size={13} /> خروج</button>
+          </div>
+        </div>
+      </div>
+
+      <main style={{ maxWidth: 900, margin: '0 auto', padding: '26px 20px 60px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Users size={18} color={C.gold} />
+            <span style={{ fontSize: 16, fontWeight: 800 }}>مدیریت کاربران</span>
+          </div>
+          <button className="iraf-refresh-btn" onClick={() => setFormOpen((v) => !v)} style={{ background: C.gold, color: '#FFFFFF' }}>
+            <Plus size={13} /> کاربر جدید
+          </button>
+        </div>
+
+        {formOpen && (
+          <form onSubmit={handleCreate} className="iraf-card" style={{ padding: 18, marginBottom: 22 }}>
+            {formError && (
+              <div style={{ background: C.maroonSoft, color: C.maroon, padding: '9px 12px', borderRadius: 8, fontSize: 12.5, marginBottom: 14 }}>
+                {formError}
+              </div>
+            )}
+            <div className="iraf-admin-form-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, color: C.textMuted, display: 'block', marginBottom: 6 }}>نام‌کاربری</label>
+                <input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="iraf-text-input" required />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: C.textMuted, display: 'block', marginBottom: 6 }}>رمز عبور</label>
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="iraf-text-input" required minLength={6} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: C.textMuted, display: 'block', marginBottom: 6 }}>نوع دسترسی</label>
+                <select value={newRole} onChange={(e) => setNewRole(e.target.value)} className="iraf-text-input">
+                  <option value="region">کاربر منطقه‌ای</option>
+                  <option value="admin">مدیر کل</option>
+                </select>
+              </div>
+              {newRole === 'region' && (
+                <div>
+                  <label style={{ fontSize: 12, color: C.textMuted, display: 'block', marginBottom: 6 }}>منطقه</label>
+                  <select value={newRegion} onChange={(e) => setNewRegion(e.target.value)} className="iraf-text-input">
+                    {REGIONS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <button type="submit" disabled={saving} className="iraf-refresh-btn" style={{ background: C.gold, color: '#FFFFFF' }}>
+              {saving ? 'در حال ساخت...' : 'ساخت کاربر'}
+            </button>
+          </form>
+        )}
+
+        {status === 'loading' && <StateBlock icon={<Loader2 size={22} style={{ animation: 'iraf-spin 1s linear infinite' }} />} text="در حال بارگذاری کاربران..." />}
+        {status === 'error' && <StateBlock icon={<WifiOff size={22} />} text="ارتباط با سرور برقرار نشد." color={C.maroon} />}
+
+        {status === 'ready' && (
+          <div className="iraf-card" style={{ padding: 0, overflow: 'hidden' }}>
+            {users.map((u, i) => (
+              <div
+                key={u.username}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px',
+                  borderBottom: i < users.length - 1 ? `1px solid ${C.borderSoft}` : 'none',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>{u.username}</div>
+                  <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 2 }}>
+                    {u.role === 'admin' ? 'مدیر کل' : `کاربر منطقه‌ای · ${regionLabel(u.region)}`}
+                  </div>
+                </div>
+                {u.username !== user.username && (
+                  <button
+                    onClick={() => handleDelete(u.username)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.maroon, padding: 6 }}
+                    title="حذف کاربر"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {users.length === 0 && <div style={{ padding: 20, textAlign: 'center', fontSize: 12.5, color: C.textFaint }}>هنوز کاربری ساخته نشده.</div>}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   صفحه‌ی هر منطقه — هدر با لوگو، ساعت زنده، ناوبری مناطق (بر اساس دسترسی کاربر)
+--------------------------------------------------------------------- */
+function RegionPage({ user, onLogout }) {
   const params = useParams();
   const navigate = useNavigate();
 
-  const validRegion = REGIONS.some((r) => r.key === params.region) ? params.region : 'iraq';
+  const isAdmin = user.role === 'admin';
+  const allowedRegions = isAdmin ? REGIONS : REGIONS.filter((r) => r.key === user.region);
+
+  const validRegion = allowedRegions.some((r) => r.key === params.region) ? params.region : allowedRegions[0].key;
   const validTab = TABS.some((t) => t.key === params.tab) ? params.tab : 'live';
   const clockInfo = REGION_CLOCKS[validRegion] || REGION_CLOCKS.iraq;
 
@@ -1106,7 +1398,7 @@ function RegionPage() {
     <div className="iraf-root">
       <style>{FONT_IMPORT}</style>
 
-      {/* نوار باریک بالا: خبر فوری (فقط راوی عراق) + ساعت زنده بر اساس منطقه‌ی فعال */}
+      {/* نوار باریک بالا: خبر فوری (عراق/سوریه) + ساعت زنده بر اساس منطقه‌ی فعال */}
       <div style={{ background: '#0D0D6E' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '6px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1122,31 +1414,44 @@ function RegionPage() {
           className="iraf-header-inner"
           style={{ maxWidth: 1280, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '10px 20px', flexWrap: 'wrap' }}
         >
-          <Link to="/iraq/live" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}>
+          <Link to={`/${allowedRegions[0].key}/live`} style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none' }}>
             <img src={raviLogo} alt="راوی" style={{ height: 46, width: 'auto', display: 'block' }} />
-            <div style={{ borderRight: `1.5px solid ${C.border}`, paddingRight: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div className="iraf-header-slogan" style={{ borderRight: `1.5px solid ${C.border}`, paddingRight: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <span style={{ fontSize: 13, fontWeight: 800, color: C.gold, lineHeight: 1.5 }}>روایت زنده‌ی رویدادها</span>
               <span style={{ fontSize: 10.5, color: C.textFaint, lineHeight: 1.5 }}>هر خبر، همان لحظه</span>
             </div>
           </Link>
 
-          <nav style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {REGIONS.map((r) => (
-              <Link
-                key={r.key}
-                to={`/${r.key}/live`}
-                style={{
-                  background: validRegion === r.key ? C.gold : 'transparent',
-                  color: validRegion === r.key ? '#FFFFFF' : C.gold,
-                  border: `1px solid ${validRegion === r.key ? C.gold : C.border}`,
-                  borderRadius: 8, padding: '8px 15px', fontSize: 13, fontWeight: 700,
-                  textDecoration: 'none', transition: 'all 0.15s ease',
-                }}
-              >
-                {r.label}
-              </Link>
-            ))}
-          </nav>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <nav style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {allowedRegions.map((r) => (
+                <Link
+                  key={r.key}
+                  to={`/${r.key}/live`}
+                  style={{
+                    background: validRegion === r.key ? C.gold : 'transparent',
+                    color: validRegion === r.key ? '#FFFFFF' : C.gold,
+                    border: `1px solid ${validRegion === r.key ? C.gold : C.border}`,
+                    borderRadius: 8, padding: '8px 15px', fontSize: 13, fontWeight: 700,
+                    textDecoration: 'none', transition: 'all 0.15s ease',
+                  }}
+                >
+                  {r.label}
+                </Link>
+              ))}
+            </nav>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderRight: `1.5px solid ${C.border}`, paddingRight: 10, marginRight: 2 }}>
+              {isAdmin && (
+                <Link to="/admin/users" className="iraf-refresh-btn" style={{ textDecoration: 'none' }}>
+                  <Users size={13} /> کاربران
+                </Link>
+              )}
+              <button className="iraf-refresh-btn" onClick={onLogout}>
+                <LogOut size={13} /> خروج
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1179,14 +1484,67 @@ function RegionPage() {
   );
 }
 
+/* ---------------------------------------------------------------------
+   ریشه‌ی اپلیکیشن — دروازه‌ی احراز هویت + مسیریابی
+--------------------------------------------------------------------- */
 export default function App() {
+  const [authState, setAuthState] = useState({ loading: true, user: null });
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      setAuthState({ loading: false, user: null });
+      return;
+    }
+    authFetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          setAuthState({ loading: false, user: { username: data.username, role: data.role, region: data.region } });
+        } else {
+          clearToken();
+          setAuthState({ loading: false, user: null });
+        }
+      })
+      .catch(() => {
+        clearToken();
+        setAuthState({ loading: false, user: null });
+      });
+  }, []);
+
+  const handleLoggedIn = (user) => setAuthState({ loading: false, user });
+
+  const handleLogout = async () => {
+    try { await authFetch('/api/auth/logout', { method: 'POST' }); } catch { /* بی‌خیال، هرحالت clearToken انجام می‌شه */ }
+    clearToken();
+    setAuthState({ loading: false, user: null });
+  };
+
+  if (authState.loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 size={26} style={{ animation: 'iraf-spin 1s linear infinite', color: C.gold }} />
+      </div>
+    );
+  }
+
+  if (!authState.user) {
+    return <LoginPage onLoggedIn={handleLoggedIn} />;
+  }
+
+  const homeRegion = authState.user.role === 'admin' ? 'iraq' : authState.user.region;
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/iraq/live" replace />} />
-        <Route path="/:region" element={<RegionPage />} />
-        <Route path="/:region/:tab" element={<RegionPage />} />
-        <Route path="*" element={<Navigate to="/iraq/live" replace />} />
+        <Route path="/" element={<Navigate to={`/${homeRegion}/live`} replace />} />
+        <Route
+          path="/admin/users"
+          element={authState.user.role === 'admin' ? <AdminUsersPage user={authState.user} onLogout={handleLogout} /> : <Navigate to="/" replace />}
+        />
+        <Route path="/:region" element={<RegionPage user={authState.user} onLogout={handleLogout} />} />
+        <Route path="/:region/:tab" element={<RegionPage user={authState.user} onLogout={handleLogout} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
