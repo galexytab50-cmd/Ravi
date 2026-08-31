@@ -344,9 +344,92 @@ async function handleClearPosts(request, env, region) {
 }
 
 /* -------------------------------------------------------------------
+   خوندن کانال‌های عمومی که ربات ادمینشون نیست (مثل SyriaMonitoring برای راوی سوریه)
+   از صفحه‌ی پیش‌نمایش عمومی تلگرام، بدون نیاز به ترجمه.
+------------------------------------------------------------------- */
+const SCRAPED_CHANNELS_BY_REGION = {
+  syria: 'SyriaMonitoring',
+};
+const SCRAPE_INTERVAL_MS = 3 * 60 * 1000; // حداکثر هر ۳ دقیقه یک بار اسکرپ می‌شه
+
+async function scrapeChannelPosts(channelUsername) {
+  const res = await fetch(`https://t.me/s/${channelUsername}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RaviBot/1.0)' },
+  });
+  if (!res.ok) throw new Error(`دریافت صفحه‌ی ${channelUsername} با خطای ${res.status} مواجه شد`);
+  const html = await res.text();
+
+  const chunks = html.split('class="tgme_widget_message_wrap').slice(1);
+  const posts = [];
+
+  for (const chunk of chunks) {
+    const postMatch = chunk.match(/data-post="([^"]+)"/);
+    if (!postMatch) continue;
+
+    const textMatch = chunk.match(/class="tgme_widget_message_text js-message_text"[^>]*>([\s\S]*?)<\/div>/);
+    const timeMatch = chunk.match(/<time datetime="([^"]+)"/);
+    const photoMatch = chunk.match(/tgme_widget_message_photo_wrap"[^>]*style="[^"]*background-image:url\('([^']+)'\)/);
+
+    const text = textMatch ? stripHtmlTags(textMatch[1]) : '';
+    if (!text && !photoMatch) continue;
+
+    const messageIdStr = postMatch[1].split('/')[1];
+
+    posts.push({
+      id: postMatch[1],
+      messageId: parseInt(messageIdStr, 10) || 0,
+      text,
+      date: timeMatch ? new Date(timeMatch[1]).getTime() : Date.now(),
+      photoFileId: null,
+      photoUrl: photoMatch ? photoMatch[1] : null,
+      link: `https://t.me/${postMatch[1]}`,
+    });
+  }
+
+  return posts;
+}
+
+async function maybeScrapeChannelForRegion(env, region) {
+  const channelUsername = SCRAPED_CHANNELS_BY_REGION[region];
+  if (!channelUsername) return;
+
+  const lastScrapeKey = `scrape_last_at:${region}`;
+  const lastRaw = await env.POSTS.get(lastScrapeKey);
+  const last = lastRaw ? parseInt(lastRaw, 10) : 0;
+  const now = Date.now();
+  if (now - last < SCRAPE_INTERVAL_MS) return;
+
+  // فوری ثبت می‌کنیم تا درخواست‌های هم‌زمان دیگه دوباره اسکرپ نکنن
+  await env.POSTS.put(lastScrapeKey, String(now));
+
+  try {
+    const scraped = await scrapeChannelPosts(channelUsername);
+    if (scraped.length === 0) return;
+
+    const key = postsKey(region);
+    const existingRaw = await env.POSTS.get(key);
+    let list = existingRaw ? JSON.parse(existingRaw) : [];
+
+    for (const post of scraped) {
+      const idx = list.findIndex((p) => p.id === post.id);
+      if (idx >= 0) list[idx] = post;
+      else list.unshift(post);
+    }
+
+    list.sort((a, b) => b.date - a.date);
+    list = list.slice(0, MAX_STORED_POSTS);
+    await env.POSTS.put(key, JSON.stringify(list));
+  } catch {
+    // اگه اسکرپ خطا داد، بی‌سروصدا رد می‌شیم؛ نوبت بعدی دوباره امتحان می‌شه
+  }
+}
+
+/* -------------------------------------------------------------------
    تب «پوشش زنده اخبار» - همه‌ی پست‌ها، بدون محدودیت نمایشی
 ------------------------------------------------------------------- */
 async function handlePosts(env, region) {
+  await maybeScrapeChannelForRegion(env, region);
+
   const raw = await env.POSTS.get(postsKey(region));
   let posts = [];
   if (raw) {
@@ -385,6 +468,8 @@ function getIraqDayStartMs(nowMs) {
 }
 
 async function handleArchive(request, env, region) {
+  await maybeScrapeChannelForRegion(env, region);
+
   const url = new URL(request.url);
   const dateParam = url.searchParams.get('date'); // فرمت مورد انتظار: YYYY-MM-DD
 
