@@ -10,7 +10,7 @@ const MAX_STORED_POSTS = 5000; // سقف فنی برای جلوگیری از ر�
 
 // چهار منطقه: عراق از قبل کلیدهای خودش رو داره (بدون تغییر، برای سازگاری با داده‌ی قدیمی)،
 // بقیه‌ی مناطق کلید جدا با پیشوند منطقه می‌گیرن — تا وقتی کانالی وصل نشده، همیشه خالی برمی‌گردن.
-const VALID_REGIONS = ['iraq', 'usa', 'europe', 'latam'];
+const VALID_REGIONS = ['iraq', 'syria', 'usa', 'europe', 'latam'];
 
 function normalizeRegion(region) {
   return VALID_REGIONS.includes(region) ? region : 'iraq';
