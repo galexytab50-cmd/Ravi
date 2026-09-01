@@ -323,15 +323,16 @@ function Modal({ title, onClose, children }) {
 /* ---------------------------------------------------------------------
    کارت پست
 --------------------------------------------------------------------- */
-function PostCard({ post }) {
-  const [imgFailed, setImgFailed] = useState(false);
+/* ---------------------------------------------------------------------
+   ابزار مشترک سناریو ساز و کپشن ساز — روی هر متنی (نه فقط پست) قابل استفاده
+--------------------------------------------------------------------- */
+function ScenarioCaptionTools({ text }) {
   const [scenarioState, setScenarioState] = useState(null); // null | {status, data, error}
   const [captionState, setCaptionState] = useState(null);
   const [scenarioPanelOpen, setScenarioPanelOpen] = useState(false);
   const [captionPanelOpen, setCaptionPanelOpen] = useState(false);
   const [scenarioForm, setScenarioForm] = useState({ format: 'video', language: 'fa', arabicDialect: 'iraqi', count: 1, instructions: '' });
   const [captionForm, setCaptionForm] = useState({ language: 'fa', arabicDialect: 'iraqi', platforms: ['instagram'], count: 1, instructions: '' });
-  const dateMs = new Date(post.date).getTime();
 
   const togglePlatform = (key) => {
     setCaptionForm((f) => {
@@ -342,12 +343,16 @@ function PostCard({ post }) {
   };
 
   const runScenario = async () => {
+    if (!text || !text.trim()) {
+      setScenarioState({ status: 'error', error: 'متنی برای ارسال وجود ندارد.' });
+      return;
+    }
     setScenarioState({ status: 'loading' });
     try {
       const res = await authFetch('/api/scenario/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: post.text, ...scenarioForm }),
+        body: JSON.stringify({ text, ...scenarioForm }),
       });
       const data = await res.json();
       if (data.ok) setScenarioState({ status: 'ready', data: data.scenario });
@@ -358,6 +363,10 @@ function PostCard({ post }) {
   };
 
   const runCaption = async () => {
+    if (!text || !text.trim()) {
+      setCaptionState({ status: 'error', error: 'متنی برای ارسال وجود ندارد.' });
+      return;
+    }
     if (captionForm.platforms.length === 0) {
       setCaptionState({ status: 'error', error: 'حداقل یک پلتفرم را انتخاب کن.' });
       return;
@@ -367,7 +376,7 @@ function PostCard({ post }) {
       const res = await authFetch('/api/caption/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: post.text, ...captionForm }),
+        body: JSON.stringify({ text, ...captionForm }),
       });
       const data = await res.json();
       if (data.ok) setCaptionState({ status: 'ready', data: data.captions });
@@ -378,173 +387,136 @@ function PostCard({ post }) {
   };
 
   return (
-    <div className="iraf-card iraf-fadeup" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {post.photoUrl && !imgFailed && (
-        <img
-          src={post.photoUrl}
-          alt=""
-          loading="lazy"
-          onError={() => setImgFailed(true)}
-          style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block', borderBottom: `1px solid ${C.borderSoft}` }}
-        />
-      )}
-      <div style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-        {post.text && (
-          <div style={{ fontSize: 13.5, lineHeight: 1.9, whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'justify' }}>
-            {post.text}
-          </div>
-        )}
-        {!post.text && !post.photoUrl && (
-          <div style={{ fontSize: 12.5, color: C.textFaint, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ImageOff size={14} /> پیام بدون متن یا تصویر
-          </div>
-        )}
-
-        <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <span className="iraf-mono" style={{ fontSize: 10.5, color: C.textFaint }} title={new Date(post.date).toLocaleString('fa-IR')}>
-            {timeAgoFa(dateMs)}
-          </span>
-          {post.link && (
-            <a href={post.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: C.gold, display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none', fontWeight: 600 }}>
-              مشاهده در تلگرام <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
-
-        {post.text && (
-          <>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button className="iraf-tool-btn" onClick={() => setScenarioPanelOpen((v) => !v)}>
-                <Film size={12} /> ارسال به سناریو ساز
-              </button>
-              <button className="iraf-tool-btn" onClick={() => setCaptionPanelOpen((v) => !v)}>
-                <MessageSquare size={12} /> ارسال به کپشن ساز
-              </button>
-            </div>
-
-            {scenarioPanelOpen && (
-              <div className="iraf-tool-panel">
-                <div className="iraf-tool-panel-row">
-                  <select
-                    value={scenarioForm.format}
-                    onChange={(e) => setScenarioForm((f) => ({ ...f, format: e.target.value }))}
-                    className="iraf-text-input iraf-tool-select"
-                  >
-                    {SCENARIO_FORMATS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                  <select
-                    value={scenarioForm.language}
-                    onChange={(e) => setScenarioForm((f) => ({ ...f, language: e.target.value }))}
-                    className="iraf-text-input iraf-tool-select"
-                  >
-                    {LANGUAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                  {scenarioForm.language === 'ar' && (
-                    <select
-                      value={scenarioForm.arabicDialect}
-                      onChange={(e) => setScenarioForm((f) => ({ ...f, arabicDialect: e.target.value }))}
-                      className="iraf-text-input iraf-tool-select"
-                    >
-                      {ARABIC_DIALECTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                    </select>
-                  )}
-                  <input
-                    type="number" min={1} max={5}
-                    value={scenarioForm.count}
-                    onChange={(e) => setScenarioForm((f) => ({ ...f, count: e.target.value }))}
-                    className="iraf-text-input"
-                    style={{ width: 62, flexShrink: 0 }}
-                    title="تعداد نسخه‌ها"
-                  />
-                </div>
-                <textarea
-                  placeholder="توضیح دلخواه درباره‌ی سیاست تولید (لحن، تمرکز، نکاتی که باید رعایت بشه)..."
-                  value={scenarioForm.instructions}
-                  onChange={(e) => setScenarioForm((f) => ({ ...f, instructions: e.target.value }))}
-                  className="iraf-text-input"
-                  rows={2}
-                  style={{ resize: 'vertical', marginTop: 8 }}
-                />
-                <button
-                  className="iraf-tool-btn"
-                  style={{ marginTop: 8, background: C.gold, color: '#FFFFFF', justifyContent: 'center', width: '100%' }}
-                  onClick={runScenario}
-                  disabled={scenarioState && scenarioState.status === 'loading'}
-                >
-                  {scenarioState && scenarioState.status === 'loading' ? 'در حال ساخت...' : 'تولید سناریو'}
-                </button>
-              </div>
-            )}
-
-            {captionPanelOpen && (
-              <div className="iraf-tool-panel">
-                <div className="iraf-tool-panel-row">
-                  <select
-                    value={captionForm.language}
-                    onChange={(e) => setCaptionForm((f) => ({ ...f, language: e.target.value }))}
-                    className="iraf-text-input iraf-tool-select"
-                  >
-                    {LANGUAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
-                  {captionForm.language === 'ar' && (
-                    <select
-                      value={captionForm.arabicDialect}
-                      onChange={(e) => setCaptionForm((f) => ({ ...f, arabicDialect: e.target.value }))}
-                      className="iraf-text-input iraf-tool-select"
-                    >
-                      {ARABIC_DIALECTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                    </select>
-                  )}
-                  <input
-                    type="number" min={1} max={5}
-                    value={captionForm.count}
-                    onChange={(e) => setCaptionForm((f) => ({ ...f, count: e.target.value }))}
-                    className="iraf-text-input"
-                    style={{ width: 62, flexShrink: 0 }}
-                    title="تعداد کپشن به‌ازای هر پلتفرم"
-                  />
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-                  {PLATFORMS.map((p) => {
-                    const active = captionForm.platforms.includes(p.key);
-                    return (
-                      <button
-                        key={p.key}
-                        type="button"
-                        onClick={() => togglePlatform(p.key)}
-                        style={{
-                          fontSize: 11.5, padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
-                          border: `1px solid ${active ? C.gold : C.border}`,
-                          background: active ? C.goldSoft : 'transparent',
-                          color: active ? C.gold : C.textMuted,
-                        }}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <textarea
-                  placeholder="توضیح دلخواه درباره‌ی سیاست تولید (لحن، تمرکز، نکاتی که باید رعایت بشه)..."
-                  value={captionForm.instructions}
-                  onChange={(e) => setCaptionForm((f) => ({ ...f, instructions: e.target.value }))}
-                  className="iraf-text-input"
-                  rows={2}
-                  style={{ resize: 'vertical', marginTop: 8 }}
-                />
-                <button
-                  className="iraf-tool-btn"
-                  style={{ marginTop: 8, background: C.gold, color: '#FFFFFF', justifyContent: 'center', width: '100%' }}
-                  onClick={runCaption}
-                  disabled={captionState && captionState.status === 'loading'}
-                >
-                  {captionState && captionState.status === 'loading' ? 'در حال ساخت...' : 'تولید کپشن'}
-                </button>
-              </div>
-            )}
-          </>
-        )}
+    <>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="iraf-tool-btn" onClick={() => setScenarioPanelOpen((v) => !v)}>
+          <Film size={12} /> ارسال به سناریو ساز
+        </button>
+        <button className="iraf-tool-btn" onClick={() => setCaptionPanelOpen((v) => !v)}>
+          <MessageSquare size={12} /> ارسال به کپشن ساز
+        </button>
       </div>
+
+      {scenarioPanelOpen && (
+        <div className="iraf-tool-panel">
+          <div className="iraf-tool-panel-row">
+            <select
+              value={scenarioForm.format}
+              onChange={(e) => setScenarioForm((f) => ({ ...f, format: e.target.value }))}
+              className="iraf-text-input iraf-tool-select"
+            >
+              {SCENARIO_FORMATS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            <select
+              value={scenarioForm.language}
+              onChange={(e) => setScenarioForm((f) => ({ ...f, language: e.target.value }))}
+              className="iraf-text-input iraf-tool-select"
+            >
+              {LANGUAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            {scenarioForm.language === 'ar' && (
+              <select
+                value={scenarioForm.arabicDialect}
+                onChange={(e) => setScenarioForm((f) => ({ ...f, arabicDialect: e.target.value }))}
+                className="iraf-text-input iraf-tool-select"
+              >
+                {ARABIC_DIALECTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            )}
+            <input
+              type="number" min={1} max={5}
+              value={scenarioForm.count}
+              onChange={(e) => setScenarioForm((f) => ({ ...f, count: e.target.value }))}
+              className="iraf-text-input"
+              style={{ width: 62, flexShrink: 0 }}
+              title="تعداد نسخه‌ها"
+            />
+          </div>
+          <textarea
+            placeholder="توضیح دلخواه درباره‌ی سیاست تولید (لحن، تمرکز، نکاتی که باید رعایت بشه)..."
+            value={scenarioForm.instructions}
+            onChange={(e) => setScenarioForm((f) => ({ ...f, instructions: e.target.value }))}
+            className="iraf-text-input"
+            rows={2}
+            style={{ resize: 'vertical', marginTop: 8 }}
+          />
+          <button
+            className="iraf-tool-btn"
+            style={{ marginTop: 8, background: C.gold, color: '#FFFFFF', justifyContent: 'center', width: '100%' }}
+            onClick={runScenario}
+            disabled={scenarioState && scenarioState.status === 'loading'}
+          >
+            {scenarioState && scenarioState.status === 'loading' ? 'در حال ساخت...' : 'تولید سناریو'}
+          </button>
+        </div>
+      )}
+
+      {captionPanelOpen && (
+        <div className="iraf-tool-panel">
+          <div className="iraf-tool-panel-row">
+            <select
+              value={captionForm.language}
+              onChange={(e) => setCaptionForm((f) => ({ ...f, language: e.target.value }))}
+              className="iraf-text-input iraf-tool-select"
+            >
+              {LANGUAGES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            {captionForm.language === 'ar' && (
+              <select
+                value={captionForm.arabicDialect}
+                onChange={(e) => setCaptionForm((f) => ({ ...f, arabicDialect: e.target.value }))}
+                className="iraf-text-input iraf-tool-select"
+              >
+                {ARABIC_DIALECTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            )}
+            <input
+              type="number" min={1} max={5}
+              value={captionForm.count}
+              onChange={(e) => setCaptionForm((f) => ({ ...f, count: e.target.value }))}
+              className="iraf-text-input"
+              style={{ width: 62, flexShrink: 0 }}
+              title="تعداد کپشن به‌ازای هر پلتفرم"
+            />
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {PLATFORMS.map((p) => {
+              const active = captionForm.platforms.includes(p.key);
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => togglePlatform(p.key)}
+                  style={{
+                    fontSize: 11.5, padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontWeight: 700,
+                    border: `1px solid ${active ? C.gold : C.border}`,
+                    background: active ? C.goldSoft : 'transparent',
+                    color: active ? C.gold : C.textMuted,
+                  }}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+          <textarea
+            placeholder="توضیح دلخواه درباره‌ی سیاست تولید (لحن، تمرکز، نکاتی که باید رعایت بشه)..."
+            value={captionForm.instructions}
+            onChange={(e) => setCaptionForm((f) => ({ ...f, instructions: e.target.value }))}
+            className="iraf-text-input"
+            rows={2}
+            style={{ resize: 'vertical', marginTop: 8 }}
+          />
+          <button
+            className="iraf-tool-btn"
+            style={{ marginTop: 8, background: C.gold, color: '#FFFFFF', justifyContent: 'center', width: '100%' }}
+            onClick={runCaption}
+            disabled={captionState && captionState.status === 'loading'}
+          >
+            {captionState && captionState.status === 'loading' ? 'در حال ساخت...' : 'تولید کپشن'}
+          </button>
+        </div>
+      )}
 
       {scenarioState && (
         <Modal title="سناریوی تولیدشده" onClose={() => setScenarioState(null)}>
@@ -638,6 +610,57 @@ function PostCard({ post }) {
           )}
         </Modal>
       )}
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   کارت پست
+--------------------------------------------------------------------- */
+function PostCard({ post }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const dateMs = new Date(post.date).getTime();
+
+  return (
+    <div className="iraf-card iraf-fadeup" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {post.photoUrl && !imgFailed && (
+        <img
+          src={post.photoUrl}
+          alt=""
+          loading="lazy"
+          onError={() => setImgFailed(true)}
+          style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', display: 'block', borderBottom: `1px solid ${C.borderSoft}` }}
+        />
+      )}
+      <div style={{ padding: '13px 15px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+        {post.text && (
+          <div style={{ fontSize: 13.5, lineHeight: 1.9, whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'justify' }}>
+            {post.text}
+          </div>
+        )}
+        {!post.text && !post.photoUrl && (
+          <div style={{ fontSize: 12.5, color: C.textFaint, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ImageOff size={14} /> پیام بدون متن یا تصویر
+          </div>
+        )}
+
+        <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span className="iraf-mono" style={{ fontSize: 10.5, color: C.textFaint }} title={new Date(post.date).toLocaleString('fa-IR')}>
+            {timeAgoFa(dateMs)}
+          </span>
+          {post.link && (
+            <a href={post.link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: C.gold, display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none', fontWeight: 600 }}>
+              مشاهده در تلگرام <ExternalLink size={12} />
+            </a>
+          )}
+        </div>
+
+        {post.text && (
+          <div style={{ marginTop: 10 }}>
+            <ScenarioCaptionTools text={post.text} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1115,6 +1138,7 @@ function InfographicTab({ region }) {
   const [status, setStatus] = useState('loading');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  const [pastedText, setPastedText] = useState('');
   const posterRef = useRef(null);
 
   const load = async () => {
@@ -1134,6 +1158,15 @@ function InfographicTab({ region }) {
   };
 
   useEffect(() => { load(); }, [region]);
+
+  useEffect(() => {
+    if (report) {
+      const auto = [report.summary, ...(report.top5News || []).map((n, i) => `${i + 1}. ${n}`)]
+        .filter(Boolean)
+        .join('\n\n');
+      setPastedText(auto);
+    }
+  }, [report]);
 
   const handleDownload = async () => {
     if (!posterRef.current || !report) return;
@@ -1291,6 +1324,24 @@ function InfographicTab({ region }) {
               تولیدشده توسط راوی عراق
             </div>
           </div>
+        </div>
+      )}
+
+      {status === 'ready' && report && (
+        <div className="iraf-card" style={{ padding: 16, marginTop: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>ارسال به سناریو ساز / کپشن ساز</div>
+          <div style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 10 }}>
+            خلاصه و خبرهای مهم گزارش اینجا پیست شده؛ قبل از تولید می‌تونی ویرایشش کنی.
+          </div>
+          <textarea
+            value={pastedText}
+            onChange={(e) => setPastedText(e.target.value)}
+            className="iraf-text-input"
+            rows={5}
+            style={{ resize: 'vertical', marginBottom: 12 }}
+            placeholder="متنی که می‌خوای بر مبناش سناریو یا کپشن بسازیم..."
+          />
+          <ScenarioCaptionTools text={pastedText} />
         </div>
       )}
     </div>
