@@ -4,7 +4,7 @@ import html2canvas from 'html2canvas';
 import {
   Newspaper, RefreshCw, ExternalLink, ImageOff, WifiOff, Loader2,
   Archive, ShieldAlert, CalendarDays, Hash, AlertTriangle, Image as ImageIcon, Download, Clock,
-  Film, MessageSquare, Cloud, X, LogOut, Users, Trash2, Plus, Lock, User,
+  Film, MessageSquare, Cloud, X, LogOut, Users, Trash2, Plus, Lock, User, Menu,
 } from 'lucide-react';
 import raviLogo from './assets/ravi-logo.png';
 
@@ -131,10 +131,21 @@ input { font-family: inherit; }
 }
 .iraf-text-input:focus { outline: 2px solid ${C.goldSoft}; border-color: ${C.gold}; }
 
+.iraf-mobile-menu-btn {
+  display: none; align-items: center; justify-content: center; gap: 6px;
+  background: ${C.goldSoft}; color: ${C.gold}; border: 1px solid ${C.border}; border-radius: 8px;
+  padding: 9px 14px; font-size: 13px; font-weight: 700; cursor: pointer; width: 100%;
+}
+
 @media (max-width: 780px) {
   .iraf-layout { flex-direction: column; }
-  .iraf-sidebar { width: 100%; flex-direction: row; overflow-x: auto; position: static; }
-  .iraf-side-btn { flex-shrink: 0; width: auto; white-space: nowrap; }
+  .iraf-mobile-menu-btn { display: flex; }
+  .iraf-sidebar {
+    display: none; width: 100%; position: static; background: ${C.surface};
+    border: 1px solid ${C.border}; border-radius: 10px; padding: 8px; margin-top: 8px;
+  }
+  .iraf-sidebar.iraf-mobile-open { display: flex; }
+  .iraf-side-btn { flex-shrink: 0; }
 }
 @media (max-width: 640px) {
   .iraf-layout { padding: 16px 14px 50px !important; }
@@ -1380,6 +1391,7 @@ function AdminUsersPage({ user, onLogout }) {
 function RegionPage({ user, onLogout }) {
   const params = useParams();
   const navigate = useNavigate();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isAdmin = user.role === 'admin';
   const allowedRegions = isAdmin ? REGIONS : REGIONS.filter((r) => r.key === user.region);
@@ -1387,12 +1399,17 @@ function RegionPage({ user, onLogout }) {
   const validRegion = allowedRegions.some((r) => r.key === params.region) ? params.region : allowedRegions[0].key;
   const validTab = TABS.some((t) => t.key === params.tab) ? params.tab : 'live';
   const clockInfo = REGION_CLOCKS[validRegion] || REGION_CLOCKS.iraq;
+  const activeTabLabel = (TABS.find((t) => t.key === validTab) || TABS[0]).label;
 
   useEffect(() => {
     if (params.region !== validRegion || params.tab !== validTab) {
       navigate(`/${validRegion}/${validTab}`, { replace: true });
     }
   }, [params.region, params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [validRegion, validTab]);
 
   return (
     <div className="iraf-root">
@@ -1456,7 +1473,16 @@ function RegionPage({ user, onLogout }) {
       </div>
 
       <div className="iraf-layout iraf-scroll" style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px 60px' }}>
-        <aside className="iraf-sidebar">
+        <button
+          type="button"
+          className="iraf-mobile-menu-btn"
+          onClick={() => setMobileMenuOpen((v) => !v)}
+        >
+          {mobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
+          {mobileMenuOpen ? 'بستن منو' : `منو · ${activeTabLabel}`}
+        </button>
+
+        <aside className={`iraf-sidebar ${mobileMenuOpen ? 'iraf-mobile-open' : ''}`}>
           {TABS.map((tab) => {
             const Icon = tab.icon;
             return (
