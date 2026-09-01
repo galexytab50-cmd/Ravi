@@ -804,9 +804,54 @@ ${sample}`;
 }
 
 /* -------------------------------------------------------------------
-   «ارسال به سناریو ساز» — از متن یک خبر، سناریوی کوتاه ویدیویی می‌سازه
+   «ارسال به سناریو ساز» — از متن یک خبر، سناریو می‌سازه
 ------------------------------------------------------------------- */
 const AI_TOOL_COOLDOWN_MS = 15 * 1000; // ۱۵ ثانیه، برای جلوگیری از کلیک پشت‌سرهم
+
+const SCENARIO_FORMAT_LABELS = {
+  poster: 'پوستر (تصویر ثابت همراه با متن)',
+  photo_caption: 'عکس‌نوشته (تصویر همراه با یک نقل‌قول یا متن کوتاه روی آن)',
+  video: 'ویدیوی کوتاه (مثل ریلز/شورت)',
+  documentary: 'مستند بلند',
+};
+
+const LANGUAGE_LABELS = {
+  fa: 'فارسی',
+  en: 'انگلیسی',
+  ar: 'عربی',
+  es: 'اسپانیایی',
+  fr: 'فرانسوی',
+};
+
+const ARABIC_DIALECT_LABELS = {
+  iraqi: 'لهجه‌ی عراقی',
+  levantine: 'لهجه‌ی شامی (سوریه، لبنان، فلسطین، اردن)',
+  gulf: 'لهجه‌ی شبه‌جزیره‌ای (خلیجی)',
+  egyptian: 'لهجه‌ی مصری',
+  sudanese: 'لهجه‌ی سودانی',
+};
+
+const PLATFORM_LABELS = {
+  twitter: 'ایکس (توییتر)',
+  facebook: 'فیس‌بوک',
+  instagram: 'اینستاگرام',
+  telegram: 'تلگرام',
+  youtube: 'یوتیوب',
+};
+
+function resolveLanguageInstruction(language, arabicDialect) {
+  if (language === 'ar') {
+    const dialectLabel = ARABIC_DIALECT_LABELS[arabicDialect];
+    return `زبان عربی، به ${dialectLabel || 'عربی فصیح رسانه‌ای'}`;
+  }
+  return LANGUAGE_LABELS[language] || LANGUAGE_LABELS.fa;
+}
+
+function clampCount(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(Math.max(n, 1), 5);
+}
 
 async function checkAiToolCooldown(env, cooldownKvKey) {
   const now = Date.now();
@@ -845,23 +890,39 @@ async function handleScenarioGenerate(request, env) {
     });
   }
 
-  const prompt = `متن خبر زیر را در نظر بگیر. یک سناریوی کوتاه برای تولید یک ویدیوی خبری (مثل ریلز/شورت، در حدود ۳۰ تا ۶۰ ثانیه) از روی آن بساز.
-خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) با دقیقاً این ساختار بده:
+  const format = SCENARIO_FORMAT_LABELS[body.format] ? body.format : 'video';
+  const formatLabel = SCENARIO_FORMAT_LABELS[format];
+  const language = LANGUAGE_LABELS[body.language] ? body.language : 'fa';
+  const languageInstruction = resolveLanguageInstruction(language, body.arabicDialect);
+  const count = clampCount(body.count);
+  const instructions = (body.instructions || '').toString().trim();
 
+  const formatGuide = {
+    poster: 'هر نسخه شامل دقیقاً یک بخش («پوستر») باشد: تیتر اصلی کوتاه در قسمت text، و توصیف دقیق ترکیب‌بندی بصری پوستر در قسمت visual. فیلد duration خالی بماند.',
+    photo_caption: 'هر نسخه شامل یک یا دو بخش کوتاه («عکس‌نوشته») باشد: متن کوتاه و ضربتی برای روی تصویر در قسمت text، و پیشنهاد تصویر زمینه در قسمت visual. فیلد duration خالی بماند.',
+    video: 'هر نسخه شامل ۳ تا ۶ بخش («شات») باشد؛ برای هرکدام مدت‌زمان تقریبی به ثانیه در duration (مثلاً «۵ ثانیه»)، متن گفتاری در text، و پیشنهاد تصویر/ویدیوی زمینه در visual.',
+    documentary: 'هر نسخه شامل ۴ تا ۸ بخش (مثل مقدمه، بدنه‌های موضوعی، نتیجه‌گیری) باشد؛ برای هرکدام مدت‌زمان تقریبی در duration (مثلاً «۱ دقیقه»)، متن روایت در text، و پیشنهاد تصویر/فوتیج در visual.',
+  };
+
+  const prompt = `متن خبر زیر را در نظر بگیر. ${count} نسخه‌ی متفاوت سناریو برای تولید یک «${formatLabel}» بساز.
+زبان خروجی: ${languageInstruction}.
+${formatGuide[format]}
+${instructions ? `دستورالعمل/سیاست اضافی از طرف کاربر که باید رعایت شود: «${instructions}»` : ''}
+
+خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) با دقیقاً این ساختار بده:
 {
-  "title": "یک عنوان کوتاه و جذاب برای ویدیو",
-  "totalDurationSeconds": عدد کل مدت‌زمان تقریبی به ثانیه,
-  "shots": [
+  "variants": [
     {
-      "shotNumber": 1,
-      "durationSeconds": عدد مدت این شات به ثانیه,
-      "narration": "متن دقیقی که گوینده باید در این شات بگوید",
-      "visualSuggestion": "پیشنهاد تصویر یا ویدیوی زمینه‌ی مناسب برای این شات"
+      "title": "عنوان کوتاه این نسخه",
+      "overview": "خلاصه‌ی یک یا دو جمله‌ای از رویکرد این نسخه",
+      "sections": [
+        { "label": "برچسب این بخش (مثلاً «شات ۱» یا «مقدمه» یا «پوستر»)", "duration": "مدت‌زمان تقریبی به‌صورت رشته، یا رشته‌ی خالی اگر موضوعیت ندارد", "text": "متن گفتاری یا نوشتاری این بخش", "visual": "پیشنهاد تصویر/ویدیوی زمینه‌ی این بخش" }
+      ]
     }
   ]
 }
 
-بین ۳ تا ۶ شات بساز، به‌ترتیب منطقی روایت خبر (مقدمه، بدنه، نتیجه/جمع‌بندی).
+باید دقیقاً ${count} آیتم در آرایه‌ی variants باشد.
 
 متن خبر:
 ${safeTruncate(text, 1500)}`;
@@ -908,13 +969,33 @@ async function handleCaptionGenerate(request, env) {
     });
   }
 
-  const prompt = `متن خبر زیر را در نظر بگیر. برای هرکدام از شبکه‌های اجتماعی زیر، یک کپشن جداگانه و متناسب با سبک همان شبکه (شامل هشتگ‌های مناسب) به فارسی بساز:
-- اینستاگرام: کپشن جذاب و کمی احساسی، با ایموجی مناسب و چند هشتگ پرکاربرد مرتبط
-- فیسبوک: توضیح کامل‌تر و روایی‌تر با لحن گفت‌وگومحور، مناسب برای تعامل بیشتر
-- ایکس (توییتر): کوتاه و مستقیم (حداکثر ۲۸۰ کاراکتر)، با ۲ تا ۳ هشتگ
+  const language = LANGUAGE_LABELS[body.language] ? body.language : 'fa';
+  const languageInstruction = resolveLanguageInstruction(language, body.arabicDialect);
+  const count = clampCount(body.count);
+  const instructions = (body.instructions || '').toString().trim();
 
-خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) با دقیقاً این ساختار بده:
-{"instagram": "...", "facebook": "...", "twitter": "..."}
+  const requestedPlatforms = Array.isArray(body.platforms) ? body.platforms.filter((p) => PLATFORM_LABELS[p]) : [];
+  const platforms = requestedPlatforms.length > 0 ? requestedPlatforms : ['instagram'];
+
+  const platformGuide = {
+    twitter: 'کوتاه و مستقیم، حداکثر ۲۸۰ کاراکتر، با ۲ تا ۳ هشتگ',
+    facebook: 'توضیح کامل‌تر و روایی‌تر با لحن گفت‌وگومحور، مناسب برای تعامل بیشتر',
+    instagram: 'جذاب و کمی احساسی، با ایموجی مناسب و چند هشتگ پرکاربرد مرتبط',
+    telegram: 'خلاصه‌ی خبری مستقیم و رسمی، مناسب یک کانال خبری، بدون نیاز به هشتگ زیاد',
+    youtube: 'مناسب بخش توضیحات ویدیو: یک خط جذاب اول، سپس توضیح کمی بیشتر و چند هشتگ مرتبط',
+  };
+
+  const platformsList = platforms.map((p) => `- ${PLATFORM_LABELS[p]}: ${platformGuide[p]}`).join('\n');
+  const jsonShapeExample = platforms.map((p) => `"${p}": ["...", "..."]`).join(', ');
+
+  const prompt = `متن خبر زیر را در نظر بگیر. برای هرکدام از شبکه‌های اجتماعی زیر، دقیقاً ${count} نسخه‌ی متفاوت کپشن (متناسب با سبک همان شبکه، شامل هشتگ‌های مناسب در صورت لزوم) بساز:
+${platformsList}
+
+زبان خروجی: ${languageInstruction}.
+${instructions ? `دستورالعمل/سیاست اضافی از طرف کاربر که باید رعایت شود: «${instructions}»` : ''}
+
+خروجی را فقط و فقط به‌صورت JSON خام (بدون هیچ توضیح یا markdown اضافه) بده؛ برای هر پلتفرم یک آرایه‌ی دقیقاً ${count} عضوی از رشته (کپشن)، با دقیقاً این ساختار:
+{ ${jsonShapeExample} }
 
 متن خبر:
 ${safeTruncate(text, 1500)}`;
