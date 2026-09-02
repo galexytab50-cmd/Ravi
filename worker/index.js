@@ -88,6 +88,7 @@ export default {
       if (path === '/api/scenario/generate' && request.method === 'POST') return handleScenarioGenerate(request, env);
       if (path === '/api/caption/generate' && request.method === 'POST') return handleCaptionGenerate(request, env);
       if (path === '/api/wordcloud' && request.method === 'GET') return handleWordCloud(env, region);
+      if (path === '/api/youtube-videos' && request.method === 'GET') return handleYoutubeVideos(env, region);
 
       return jsonResp({ ok: false, error: 'مسیر یافت نشد.' }, 404);
     }
@@ -1048,6 +1049,74 @@ async function callDeepSeekJson(env, userPrompt, systemPrompt) {
 /* -------------------------------------------------------------------
    «ابر کلمات روز» — کاملاً محاسباتی، بدون AI، از اخبار امروز همون منطقه
 ------------------------------------------------------------------- */
+/* -------------------------------------------------------------------
+   «رصد یوتیوب» — جست‌وجوی کلیدواژه‌ی هر منطقه با YouTube Data API،
+   نتیجه حداکثر هر ۲ ساعت یک‌بار تازه می‌شه (برای صرفه‌جویی در سهمیه‌ی رایگان API).
+------------------------------------------------------------------- */
+const YOUTUBE_CACHE_MS = 2 * 60 * 60 * 1000; // ۲ ساعت
+
+// کلیدواژه‌ی هر منطقه، به زبان همون منطقه
+const YOUTUBE_KEYWORDS_BY_REGION = {
+  iraq: 'العراق أخبار',
+  syria: 'سوريا أخبار',
+  usa: 'US news today',
+  europe: 'Europe news',
+  latam: 'Latinoamérica noticias',
+};
+
+async function handleYoutubeVideos(env, region) {
+  const cacheKey = `youtube_videos_cache:${region}`;
+  const now = Date.now();
+
+  const cachedRaw = await env.POSTS.get(cacheKey);
+  let cached = null;
+  if (cachedRaw) {
+    try { cached = JSON.parse(cachedRaw); } catch { cached = null; }
+  }
+
+  if (cached && cached.fetchedAt && now - cached.fetchedAt < YOUTUBE_CACHE_MS) {
+    return jsonResp({ videos: cached.videos, fetchedAt: cached.fetchedAt });
+  }
+
+  if (!env.YOUTUBE_API_KEY) {
+    if (cached) return jsonResp({ videos: cached.videos, fetchedAt: cached.fetchedAt, error: 'کلید YOUTUBE_API_KEY تنظیم نشده است؛ نسخه‌ی قبلی نشون داده می‌شه.' });
+    return jsonResp({ videos: [], error: 'کلید YOUTUBE_API_KEY تنظیم نشده است.' });
+  }
+
+  const keyword = YOUTUBE_KEYWORDS_BY_REGION[region] || YOUTUBE_KEYWORDS_BY_REGION.iraq;
+
+  try {
+    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=12&q=${encodeURIComponent(keyword)}&key=${env.YOUTUBE_API_KEY}`;
+    const res = await fetch(apiUrl);
+    const rawBody = await res.text();
+    if (!res.ok) throw new Error(`یوتیوب خطای ${res.status} برگرداند: ${rawBody.slice(0, 300)}`);
+
+    let data;
+    try { data = JSON.parse(rawBody); } catch { throw new Error('پاسخ یوتیوب JSON معتبر نبود.'); }
+
+    const videos = (data.items || [])
+      .map((item) => {
+        const snippet = item.snippet || {};
+        const thumbs = snippet.thumbnails || {};
+        return {
+          videoId: item.id && item.id.videoId,
+          title: decodeHtmlEntities(snippet.title || ''),
+          channelTitle: decodeHtmlEntities(snippet.channelTitle || ''),
+          publishedAt: snippet.publishedAt || null,
+          thumbnail: (thumbs.medium || thumbs.default || {}).url || null,
+        };
+      })
+      .filter((v) => v.videoId);
+
+    await env.POSTS.put(cacheKey, JSON.stringify({ fetchedAt: now, videos }));
+
+    return jsonResp({ videos, fetchedAt: now });
+  } catch (e) {
+    if (cached) return jsonResp({ videos: cached.videos, fetchedAt: cached.fetchedAt, error: e.message });
+    return jsonResp({ videos: [], error: e.message });
+  }
+}
+
 async function handleWordCloud(env, region) {
   const raw = await env.POSTS.get(postsKey(region));
   const allPosts = raw ? JSON.parse(raw) : [];
