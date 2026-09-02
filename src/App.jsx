@@ -4,7 +4,7 @@ import html2canvas from 'html2canvas';
 import {
   Newspaper, RefreshCw, ExternalLink, ImageOff, WifiOff, Loader2,
   Archive, ShieldAlert, CalendarDays, Hash, AlertTriangle, Image as ImageIcon, Download, Clock,
-  Film, MessageSquare, Cloud, X, LogOut, Users, Trash2, Plus, Lock, User, Menu,
+  Film, MessageSquare, Cloud, X, LogOut, Users, Trash2, Plus, Lock, User, Menu, Youtube,
 } from 'lucide-react';
 import raviLogo from './assets/ravi-logo.png';
 
@@ -626,6 +626,97 @@ function CaptionTab() {
             </div>
           )}
         </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------
+   تب «رصد یوتیوب» — کش‌شده، حداکثر هر ۲ ساعت به‌روزرسانی می‌شه
+--------------------------------------------------------------------- */
+function timeAgoOrDateFa(dateMs) {
+  if (!dateMs) return '';
+  return timeAgoFa(dateMs);
+}
+
+function YoutubeTab({ region }) {
+  const [videos, setVideos] = useState([]);
+  const [status, setStatus] = useState('loading');
+  const [refreshing, setRefreshing] = useState(false);
+  const [fetchedAt, setFetchedAt] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  const load = async (isManual = false) => {
+    if (isManual) setRefreshing(true);
+    else setStatus('loading');
+    try {
+      const res = await authFetch(`/api/youtube-videos?region=${region}`);
+      const data = await res.json();
+      setErrorMsg(data.error || null);
+      if (data.videos && data.videos.length > 0) {
+        setVideos(data.videos);
+        setFetchedAt(data.fetchedAt || null);
+        setStatus('ready');
+      } else {
+        setVideos([]);
+        setStatus('empty');
+      }
+    } catch {
+      setStatus('error');
+    } finally {
+      if (isManual) setRefreshing(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [region]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 10 }}>
+        <span style={{ fontSize: 11.5, color: C.textFaint }}>
+          {fetchedAt ? `آخرین به‌روزرسانی: ${new Date(fetchedAt).toLocaleTimeString('fa-IR')}` : 'در حال بارگذاری...'}
+          {' · حداکثر هر ۲ ساعت تازه می‌شود'}
+        </span>
+        <button className="iraf-refresh-btn" onClick={() => load(true)} disabled={refreshing}>
+          <RefreshCw size={13} style={refreshing ? { animation: 'iraf-spin 1s linear infinite' } : undefined} />
+          بروزرسانی
+        </button>
+      </div>
+
+      {errorMsg && (
+        <div className="iraf-card" style={{ padding: '10px 14px', marginBottom: 16, background: C.maroonSoft, borderColor: C.maroonSoft, fontSize: 12.5, color: C.maroon, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertTriangle size={14} /> {errorMsg}
+        </div>
+      )}
+
+      {status === 'loading' && <StateBlock icon={<Loader2 size={22} style={{ animation: 'iraf-spin 1s linear infinite' }} />} text="در حال دریافت ویدیوها..." />}
+      {status === 'error' && <StateBlock icon={<WifiOff size={22} />} text="ارتباط با سرور برقرار نشد." color={C.maroon} />}
+      {status === 'empty' && <StateBlock icon={<Youtube size={22} />} text="فعلاً ویدیویی پیدا نشد." />}
+
+      {status === 'ready' && (
+        <div className="iraf-post-grid">
+          {videos.map((v) => (
+            <a
+              key={v.videoId}
+              href={`https://www.youtube.com/watch?v=${v.videoId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="iraf-card"
+              style={{ textDecoration: 'none', color: 'inherit', display: 'flex', flexDirection: 'column' }}
+            >
+              {v.thumbnail && (
+                <img src={v.thumbnail} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block', borderBottom: `1px solid ${C.borderSoft}` }} />
+              )}
+              <div style={{ padding: '11px 13px' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.7, marginBottom: 6 }}>{v.title}</div>
+                <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span>{v.channelTitle}</span>
+                  <span className="iraf-mono">{timeAgoOrDateFa(v.publishedAt ? new Date(v.publishedAt).getTime() : null)}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1375,6 +1466,7 @@ function InfographicTab({ region }) {
 const TABS = [
   { key: 'live', label: 'پوشش زنده اخبار', icon: Newspaper },
   { key: 'wordcloud', label: 'ابر کلمات روز', icon: Cloud },
+  { key: 'youtube', label: 'رصد یوتیوب', icon: Youtube },
   { key: 'archive', label: 'آرشیو مطالب', icon: Archive },
   { key: 'psyop', label: 'عملیات روانی', icon: ShieldAlert },
   { key: 'infographic', label: 'اینفوگرافیک', icon: ImageIcon },
@@ -1769,6 +1861,7 @@ function RegionPage({ user, onLogout }) {
         <main style={{ flex: 1, minWidth: 0 }}>
           {validTab === 'live' && <LiveTab region={validRegion} />}
           {validTab === 'wordcloud' && <WordCloudTab region={validRegion} />}
+          {validTab === 'youtube' && <YoutubeTab region={validRegion} />}
           {validTab === 'archive' && <ArchiveTab region={validRegion} />}
           {validTab === 'psyop' && <PsyopTab region={validRegion} />}
           {validTab === 'infographic' && <InfographicTab region={validRegion} />}
